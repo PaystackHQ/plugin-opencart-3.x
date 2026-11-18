@@ -9,13 +9,19 @@ $_['text_edit']             = 'Edit Paystack';
 $_['text_paystack']         = '<a target="_BLANK" href="http://www.paystack.com"><img src="view/image/payment/paystack.png" alt="Paystack" title="Paystack" style="border: 1px solid #cccccc;" /></a>';
 $_['text_pay']              = 'Pay';
 $_['text_disable_payment']  = 'Disable Payment Method';
+$_['text_saved_rk']         = 'Saved restricted key …%s — leave blank to keep';
+$_['text_saved_sk']         = 'Saved secret key …%s — leave blank to keep';
+$_['text_saved_key']        = 'Saved key — leave blank to keep';
 $_['text_set_webhook']      = 'Optional: To avoid situations where bad network makes it impossible to verify transactions, set your webhook URL on your <a href="https://dashboard.paystack.co/#/settings/developer">Paystack Dashboard</a> to the URL below';
 
 // Entry
-$_['entry_live_secret']     = 'Live Secret Key:';
+$_['entry_live_secret']     = 'Live Secret or Restricted Key:';
 $_['entry_live_public']     = 'Live Public Key:';
-$_['entry_test_secret']     = 'Test Secret Key:';
+$_['entry_test_secret']     = 'Test Secret or Restricted Key:';
 $_['entry_test_public']     = 'Test Public Key:';
+
+$_['entry_test_remove']     = 'Remove saved test key';
+$_['entry_live_remove']     = 'Remove saved live key';
 
 $_['entry_live']            = 'Live Mode';
 $_['entry_debug']           = 'Debug Mode';
@@ -36,8 +42,25 @@ $_['tab_order_status']      = 'Order Status';
 $_['help_live']             = 'Use the live mode to process transactions. Request Go Live on the Paystack Dashboard to get live keys.';
 $_['help_debug']            = 'Logs additional information to the system log';
 $_['help_total']            = 'The checkout total the order must reach before this payment method becomes active';
+$_['help_secret']           = 'Paste a secret key (sk_) or a restricted key (rk_). A restricted key needs only Account: read and Transactions: read. Keys with Transactions: write or any permission that moves money are refused. The saved key is never shown; leave the field blank to keep it.';
+$_['help_public']           = 'Filled in automatically from Paystack when you use a restricted key. Required when you use a secret key.';
+$_['help_remove']           = 'A blank key field keeps the saved key. Tick this to delete it instead (not possible for the mode in use).';
 
 // Error
 $_['error_permission']      = 'Warning: You do not have permission to modify the Paystack extension!';
 $_['error_test_keys']       = 'Both test keys are required for test mode!';
 $_['error_live_keys']       = 'Both live keys are required for live mode!';
+
+$_['error_key_invalid']         = 'This key is invalid, revoked, or not enabled for restricted keys on your Paystack account.';
+$_['error_key_scope']           = 'This restricted key can\'t be used: %s. It needs Account: read and Transactions: read only. Transactions: write and permissions that can move money or change your account settings aren\'t allowed.';
+$_['error_key_scope_enable']    = 'enable %s';
+$_['error_key_scope_remove']    = 'remove these permissions: %s';
+$_['error_key_account']         = 'Paystack didn\'t return this key\'s account details. Check the key is from the right account and mode, or contact Paystack Support.';
+$_['error_key_blocked']         = 'Paystack refused our check of this key. If you use an IP whitelist on your Paystack account, add this server\'s address and try again.';
+$_['error_key_unverifiable']    = 'We couldn\'t reach Paystack to check this key. Please try again.';
+$_['error_key_wrong_mode']      = 'This key does not belong in the %s mode field.';
+$_['error_key_bad_shape']       = 'This is not a valid secret key (sk_) or restricted key (rk_).';
+$_['error_key_missing_key']     = 'A secret or restricted key is required for the mode in use.';
+$_['error_key_missing_public_key'] = 'A public key is required when you use a secret key in the mode in use.';
+$_['error_key_bad_public_key']  = 'This is not a valid public key for the %s mode.';
+$_['error_key_cannot_remove_active'] = 'You can\'t remove the key for the mode in use.';

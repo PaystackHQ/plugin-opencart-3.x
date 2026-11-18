@@ -14,11 +14,11 @@
 <script>
   function payWithPaystack(){
     var handler = PaystackPop.setup({
-      key: '{{key}}',
-      currency: '{{currency}}',
-      email: '{{email}}',
+      key: {{ key|json_encode }},
+      currency: {{ currency|json_encode }},
+      email: {{ email|json_encode }},
       amount: {{amount}},
-      ref: '{{ref}}',
+      ref: {{ ref|json_encode }},
       metadata:{
          "custom_fields":[
             {
@@ -29,13 +29,12 @@
           ]
       },
       callback: function(response){
-          window.location.href='{{callback}}'.replace('&amp;', '&').replace('&amp;', '&');
+          window.location.href={{ callback|json_encode }}.replace(/&amp;/g, '&');
       },
       onClose: function(){
-          window.location.href='{{callback}}'.replace('&amp;', '&').replace('&amp;', '&');
+          window.location.href={{ callback|json_encode }}.replace(/&amp;/g, '&');
       }
     });
-    console.log(handler);
     handler.openIframe();
   }
 </script>

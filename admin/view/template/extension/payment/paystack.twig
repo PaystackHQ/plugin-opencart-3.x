@@ -45,26 +45,24 @@
 								<label class="col-sm-2 control-label" for="entry-test-secret">{{ entry_test_secret }}
 								</label> 
 								<div class="col-sm-10">
-									<input type="text" name="payment_paystack_test_secret" value="{{ payment_paystack_test_secret }}" placeholder="{{ entry_test_secret }}" id="entry-test-secret" class="form-control" />
-
-									{% if not payment_paystack_live and error_keys %}
-									<div class="text-danger">
-									{{ error_keys }}
-									</div>
-									{% endif %}
+									<input type="password" name="payment_paystack_test_secret" value="" autocomplete="new-password" placeholder="{{ (test_key_placeholder ? test_key_placeholder : entry_test_secret)|e }}" id="entry-test-secret" class="form-control" />
+										<div class="help-block">{{ help_secret }}</div>
+										{% if test_has_key %}
+										<div class="checkbox">
+											<label><input type="checkbox" name="payment_paystack_test_remove" value="1" /> {{ entry_test_remove }}</label>
+										</div>
+										{% endif %}
+										{% if error_keys_test %}
+										<div class="text-danger">{{ error_keys_test|e }}</div>
+										{% endif %}
 								</div>
 							</div>
 							<div class="form-group required">
 								<label class="col-sm-2 control-label" for="entry-test-public">{{ entry_test_public }}
 								</label> 
 								<div class="col-sm-10">
-									<input type="text" name="payment_paystack_test_public" value="{{ payment_paystack_test_public }}" placeholder="{{ entry_test_public }}" id="entry-test-public" class="form-control" />
-
-									{% if (not payment_paystack_live and error_keys) %}
-									<div class="text-danger">
-									{{ error_keys }}
-									</div>
-									{% endif %}
+									<input type="text" name="payment_paystack_test_public" value="{{ payment_paystack_test_public|e }}" placeholder="{{ entry_test_public }}" id="entry-test-public" class="form-control" />
+										<div class="help-block">{{ help_public }}</div>
 								</div>
 							</div>
 							<div class="form-group">
@@ -83,26 +81,24 @@
 								<label class="col-sm-2 control-label" for="entry-live-secret">{{entry_live_secret }}
 								</label> 
 								<div class="col-sm-10">
-									<input type="text" name="payment_paystack_live_secret" value="{{ payment_paystack_live_secret }}" placeholder="{{ entry_live_secret }}" id="entry-live-secret" class="form-control" />
-
-									{% if (payment_paystack_live and error_keys) %}
-									<div class="text-danger">
-									{{ error_keys }}
-									</div>
-									{% endif %}
+									<input type="password" name="payment_paystack_live_secret" value="" autocomplete="new-password" placeholder="{{ (live_key_placeholder ? live_key_placeholder : entry_live_secret)|e }}" id="entry-live-secret" class="form-control" />
+										<div class="help-block">{{ help_secret }}</div>
+										{% if live_has_key %}
+										<div class="checkbox">
+											<label><input type="checkbox" name="payment_paystack_live_remove" value="1" /> {{ entry_live_remove }}</label>
+										</div>
+										{% endif %}
+										{% if error_keys_live %}
+										<div class="text-danger">{{ error_keys_live|e }}</div>
+										{% endif %}
 								</div>
 							</div>
 							<div class="form-group">
 								<label class="col-sm-2 control-label" for="entry-live-public"> {{ entry_live_public }}
 								</label> 
 								<div class="col-sm-10">
-									<input type="text" name="payment_paystack_live_public" value="{{ payment_paystack_live_public }}" placeholder="{{ entry_live_public }}" id="entry-live-public" class="form-control" />
-
-									{% if (payment_paystack_live and error_keys) %}
-									<div class="text-danger">
-									{{ error_keys }}
-									</div>
-									{% endif %}
+									<input type="text" name="payment_paystack_live_public" value="{{ payment_paystack_live_public|e }}" placeholder="{{ entry_live_public }}" id="entry-live-public" class="form-control" />
+										<div class="help-block">{{ help_public }}</div>
 								</div>
 							</div>
 							<div class="form-group">
