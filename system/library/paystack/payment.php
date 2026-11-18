@@ -37,6 +37,14 @@ class Payment
         return in_array($current, $paidIds, true) ? 'already_paid' : 'ignore';
     }
 
+    // A 200 verify body that confirms a successful charge for exactly this reference.
+    public static function isVerifiedSuccess($response, $reference)
+    {
+        return is_array($response) && isset($response['status'], $response['data']) && $response['status'] === true
+            && is_array($response['data']) && isset($response['data']['reference'], $response['data']['status'])
+            && $response['data']['reference'] === $reference && $response['data']['status'] === 'success';
+    }
+
     private static function statusId($value)
     {
         if ($value === null || $value === '' || $value === false) {

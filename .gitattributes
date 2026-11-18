@@ -1,2 +1,8 @@
 docs/ export-ignore
 tools/ export-ignore
+Dockerfile export-ignore
+docker-compose.yml export-ignore
+.dockerignore export-ignore
+local.env.sample export-ignore
+CONTRIBUTING.md export-ignore
+.gitattributes export-ignore

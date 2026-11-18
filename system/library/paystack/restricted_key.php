@@ -308,7 +308,11 @@ class Restricted_Key
         return self::isPublicKey($data['public_key'], $mode) ? $data['public_key'] : null;
     }
 
-    private function request(array $requests, $deadline)
+    private function request(
+        #[\SensitiveParameter]
+        array $requests,
+        $deadline
+    )
     {
         try {
             $raw = call_user_func($this->requester, $requests, max(0.1, $deadline));
@@ -327,7 +331,11 @@ class Restricted_Key
         return $out;
     }
 
-    private static function toRequest(array $probe, $key)
+    private static function toRequest(
+        array $probe,
+        #[\SensitiveParameter]
+        $key
+    )
     {
         return array('id' => $probe['scope'], 'method' => $probe['method'], 'path' => $probe['path'],
             'body' => $probe['body'], 'key' => $key);

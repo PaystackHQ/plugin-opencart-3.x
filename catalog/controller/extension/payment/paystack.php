@@ -127,21 +127,19 @@ class ControllerExtensionPaymentPaystack extends Controller
         $amount = isset($data['amount']) && is_int($data['amount']) ? $data['amount'] : '-';
         $requested = isset($data['requested_amount']) && is_int($data['requested_amount']) ? $data['requested_amount'] : '-';
         $currency = isset($data['currency']) && is_string($data['currency']) ? preg_replace('/[^A-Za-z]/', '', substr($data['currency'], 0, 8)) : '-';
-        $this->log->write('PAYSTACK :: ORDER ' . $order_id . ' MISMATCH expected ' . $this->expected_amount($order_info) . ' ' . $order_info['currency_code'] . ', got amount ' . $amount . ' requested_amount ' . $requested . ' ' . $currency);
-
         $note = "Paystack payment did not match this order's amount or currency; check it in your Paystack Dashboard.";
-        if ($current === 0) {
-            // A status 0 order is hidden in the admin, so move it to pending where the note can be seen.
-            $pending = $this->config->get('payment_paystack_pending_status_id');
-            if ($pending !== null && $pending !== '' && $pending !== false) {
-                $this->model_checkout_order->addOrderHistory($order_id, (int) $pending, $note, false);
-            }
-        } elseif (!$this->note_is_latest_comment($order_id, $note)) {
-            $this->model_checkout_order->addOrderHistory($order_id, $current, $note, false);
+        if ($this->note_is_latest_comment($order_id, $note)) {
+            return;
         }
+        $this->log->write('PAYSTACK :: ORDER ' . $order_id . ' MISMATCH expected ' . $this->expected_amount($order_info) . ' ' . $order_info['currency_code'] . ', got amount ' . $amount . ' requested_amount ' . $requested . ' ' . $currency);
+        // Keep the status: any move out of 0 runs OpenCart's stock, coupon and confirmation-email side effects.
+        // Status-0 orders still show under the admin's Missing Orders filter.
+        $this->model_checkout_order->addOrderHistory($order_id, $current, $note, false);
     }
 
-    private function apply_verified_payment($order_id, $reference)
+    // $trusted: the caller is an authenticated webhook or the buyer's own session, so revealing that an
+    // order is already paid leaks nothing.
+    private function apply_verified_payment($order_id, $reference, $trusted)
     {
         $this->load->model('checkout/order');
         $order_info = $this->model_checkout_order->getOrder($order_id);
@@ -155,11 +153,13 @@ class ControllerExtensionPaymentPaystack extends Controller
         $current = (int) $order_info['order_status_id'];
 
         $gate = \Paystack\Payment::statusGate($current, $unpaid, $paid_ids);
-        if ($gate !== 'proceed') {
+        if ($gate === 'ignore' || ($gate === 'already_paid' && $trusted)) {
             return $gate;
         }
-        if ($paid_status === null || $paid_status === '' || $paid_status === false) {
-            $this->log->write('PAYSTACK :: ORDER ' . (int) $order_id . ' not updated: no paid order status is configured');
+        if ($gate === 'proceed' && ($paid_status === null || $paid_status === '' || $paid_status === false)) {
+            if ($this->config->get('payment_paystack_debug')) {
+                $this->log->write('PAYSTACK :: ORDER ' . (int) $order_id . ' not updated: no paid order status is configured');
+            }
             return 'unverified';
         }
 
@@ -175,10 +175,18 @@ class ControllerExtensionPaymentPaystack extends Controller
         if ($verify['status'] !== 200 || $verify['body'] === null) {
             return 'unverified';
         }
+        if ($gate === 'already_paid') {
+            return \Paystack\Payment::isVerifiedSuccess($verify['body'], $reference) ? 'already_paid' : 'ignore';
+        }
 
         $lock = 'pstk_' . substr(sha1(DB_DATABASE . DB_PREFIX), 0, 16) . '_' . (int) $order_id;
         $row = $this->db->query("SELECT GET_LOCK('" . $this->db->escape($lock) . "', 10) AS l");
         if (!isset($row->row['l']) || (int) $row->row['l'] !== 1) {
+            // The other request may have just marked it paid (a slow mail server holds the lock).
+            $order_info = $this->model_checkout_order->getOrder($order_id);
+            if ($order_info && \Paystack\Payment::statusGate((int) $order_info['order_status_id'], $unpaid, $paid_ids) === 'already_paid') {
+                return 'already_paid';
+            }
             return 'unverified';
         }
 
@@ -259,7 +267,7 @@ class ControllerExtensionPaymentPaystack extends Controller
             && isset($event['data']['reference']) && is_string($event['data']['reference'])) {
             $order_id = \Paystack\Payment::parseReference($event['data']['reference']);
             if ($order_id !== null) {
-                $decision = $this->apply_verified_payment($order_id, $event['data']['reference']);
+                $decision = $this->apply_verified_payment($order_id, $event['data']['reference'], true);
                 if ($decision === 'unverified') {
                     $status = 503;
                 }
@@ -282,7 +290,8 @@ class ControllerExtensionPaymentPaystack extends Controller
             if (is_string($trxref)) {
                 $order_id = \Paystack\Payment::parseReference($trxref);
                 if ($order_id !== null) {
-                    $decision = $this->apply_verified_payment($order_id, $trxref);
+                    $own = isset($this->session->data['order_id']) && (int) $this->session->data['order_id'] === $order_id;
+                    $decision = $this->apply_verified_payment($order_id, $trxref, $own);
                     if ($this->config->get('payment_paystack_debug')) {
                         $this->log->write('PAYSTACK :: CALLBACK ORDER ' . $order_id . ' DECISION: ' . $decision);
                     }

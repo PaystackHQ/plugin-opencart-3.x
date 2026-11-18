@@ -121,12 +121,19 @@ class ControllerExtensionPaymentPaystack extends Controller
             $data['payment_paystack_order_status_id'] = $this->request->post['payment_paystack_order_status_id'];
         } else {
             $data['payment_paystack_order_status_id'] = $this->config->get('payment_paystack_order_status_id');
+            // Unsaved, the select would fall to its first option (often Canceled) and paid orders would be saved as that.
+            if ($data['payment_paystack_order_status_id'] === null) {
+                $data['payment_paystack_order_status_id'] = 2;
+            }
         }
 
         if (isset($this->request->post['payment_paystack_pending_status_id'])) {
             $data['payment_paystack_pending_status_id'] = $this->request->post['payment_paystack_pending_status_id'];
         } else {
             $data['payment_paystack_pending_status_id'] = $this->config->get('payment_paystack_pending_status_id');
+            if ($data['payment_paystack_pending_status_id'] === null) {
+                $data['payment_paystack_pending_status_id'] = $this->config->get('config_order_status_id');
+            }
         }
 
         $this->load->model('localisation/order_status');
@@ -202,7 +209,9 @@ class ControllerExtensionPaymentPaystack extends Controller
         $deadline_at = microtime(true) + \Paystack\Restricted_Key::OVERALL_DEADLINE;
 
         $plans = array();
-        foreach (array('test', 'live') as $mode) {
+        // The active mode is planned, and so probed, first so an inactive key can't use up the shared deadline.
+        $modes = $live_posted ? array('live', 'test') : array('test', 'live');
+        foreach ($modes as $mode) {
             $flags = \Paystack\Restricted_Key::modeFlags($mode, $live_posted, $live_stored, $status_posted, $status_stored);
             $field = function ($name) use ($post, $mode) {
                 $key = 'payment_paystack_' . $mode . '_' . $name;

@@ -68,7 +68,7 @@ Every `charge.success` webhook is re-checked with Paystack's API before an order
 ## Order status rules
 
 - An order is marked paid only when Paystack confirms a successful payment whose reference, amount and currency match the order.
-- A payment that doesn't match is logged and adds a history note for you to check. An order that hasn't left OpenCart's hidden status yet is moved to your Pending status so the note is visible; the note isn't repeated on later retries.
+- A payment that doesn't match keeps the order's status and adds one history note for you to check (orders not yet confirmed appear under the **Missing Orders** filter in Sales → Orders).
 - Failed or abandoned payments, including closing the payment popup, leave the order unchanged.
 - An order that is already paid or completed is never changed again.
 

@@ -137,5 +137,11 @@ same('requested one below amount is used', decide(array(), array('requested_amou
 same('requested zero with larger amount is mismatch', decide(array(), array('requested_amount' => 0, 'amount' => 500000)), 'mismatch');
 same('requested float is not trusted', decide(array(), array('requested_amount' => 500000.0, 'amount' => 500000)), 'paid');
 
+same('verified success exact ref', P::isVerifiedSuccess(array('status' => true, 'data' => array('reference' => REF, 'status' => 'success')), REF), true);
+same('verified success other ref', P::isVerifiedSuccess(array('status' => true, 'data' => array('reference' => '7-0123456789abc', 'status' => 'success')), REF), false);
+same('verified abandoned', P::isVerifiedSuccess(array('status' => true, 'data' => array('reference' => REF, 'status' => 'abandoned')), REF), false);
+same('verified status false', P::isVerifiedSuccess(array('status' => false, 'data' => array('reference' => REF, 'status' => 'success')), REF), false);
+same('verified null', P::isVerifiedSuccess(null, REF), false);
+
 echo "passed: $pass, failed: $fail\n";
 exit($fail ? 1 : 0);
