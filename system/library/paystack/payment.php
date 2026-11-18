@@ -40,12 +40,21 @@ class Payment
     // A 200 verify body that confirms a successful charge for exactly this reference.
     public static function isVerifiedSuccess($response, $reference)
     {
-        return is_array($response) && isset($response['status'], $response['data']) && $response['status'] === true
-            && is_array($response['data']) && isset($response['data']['reference'], $response['data']['status'])
-            && $response['data']['reference'] === $reference && $response['data']['status'] === 'success';
+        $data = self::verifiedData($response, $reference);
+        return $data !== null && isset($data['status']) && $data['status'] === 'success';
     }
 
-    private static function statusId($value)
+    private static function verifiedData($response, $reference)
+    {
+        if (!is_array($response) || !isset($response['status'], $response['data']) || $response['status'] !== true
+            || !is_array($response['data']) || !isset($response['data']['reference'])
+            || $response['data']['reference'] !== $reference) {
+            return null;
+        }
+        return $response['data'];
+    }
+
+    public static function statusId($value)
     {
         if ($value === null || $value === '' || $value === false) {
             return null;
@@ -59,12 +68,8 @@ class Payment
         if (!isset($in['http_status']) || $in['http_status'] !== 200 || !is_array($response)) {
             return 'ignore';
         }
-        if (!isset($response['status']) || $response['status'] !== true) {
-            return 'ignore';
-        }
-        $data = isset($response['data']) ? $response['data'] : null;
-        if (!is_array($data) || !isset($data['reference']) || !isset($in['reference'])
-            || !is_string($data['reference']) || $data['reference'] !== $in['reference']) {
+        $data = self::verifiedData($response, isset($in['reference']) ? $in['reference'] : null);
+        if ($data === null || !is_string($data['reference'])) {
             return 'ignore';
         }
         $orderId = self::parseReference($in['reference']);

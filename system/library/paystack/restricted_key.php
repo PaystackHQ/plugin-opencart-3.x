@@ -17,10 +17,9 @@ class Restricted_Key
         $this->requester = $requester ? $requester : array('Paystack\\Http', 'request');
     }
 
-    // Intentional divergences from BigCommerce/Shopify: transactions:write is refused (probed via the
-    // check_authorization stub, Ecwid's rule), customers and balance are refused (Ecwid), subaccounts also
-    // counts as present on the merchant-of-record 403, and account:read (ident) is required for the pk.
-    // Table order matters: offending scopes are reported in it. Never add a write-capable route.
+    // Table order is the reporting order. Never add a write-capable route. transactions:write, customers and
+    // balance are refused because this plugin never needs them; a merchant-of-record 403 on subaccounts
+    // proves the scope passed.
     public static function probes()
     {
         $refused = array(
@@ -76,12 +75,12 @@ class Restricted_Key
         return null;
     }
 
-    public static function keyMode($key)
+    public static function keyMode($key, $kind = null)
     {
         if (!is_string($key)) {
             return null;
         }
-        if (self::keyKind($key) === null && !self::isPublicKey($key)) {
+        if ($kind === null && self::keyKind($key) === null && !self::isPublicKey($key)) {
             return null;
         }
         return substr($key, 3, 4) === 'live' ? 'live' : 'test';
@@ -110,10 +109,10 @@ class Restricted_Key
 
     public static function planMode(array $in)
     {
-        $posted = isset($in['posted']) && is_string($in['posted']) ? $in['posted'] : '';
-        $stored = isset($in['stored']) && is_string($in['stored']) ? $in['stored'] : '';
-        $storedPublic = isset($in['stored_public']) && is_string($in['stored_public']) ? $in['stored_public'] : '';
-        $postedPublic = isset($in['posted_public']) && is_string($in['posted_public']) ? $in['posted_public'] : '';
+        $posted = self::str($in, 'posted');
+        $stored = self::str($in, 'stored');
+        $storedPublic = self::str($in, 'stored_public');
+        $postedPublic = self::str($in, 'posted_public');
         $mode = isset($in['mode']) ? $in['mode'] : '';
         $isActive = !empty($in['is_active']);
         $becoming = !empty($in['becoming_active']);
@@ -145,7 +144,7 @@ class Restricted_Key
         if ($kind === null) {
             return self::plan('reject', '', null, 'bad_shape');
         }
-        if (self::keyMode($key) !== $mode) {
+        if (self::keyMode($key, $kind) !== $mode) {
             return self::plan('reject', '', null, 'wrong_mode');
         }
 
@@ -168,22 +167,6 @@ class Restricted_Key
         return self::plan($fromStored ? 'keep_sk' : 'sk_check', $key, $postedPublic, null);
     }
 
-    public static function planWebhookSecret(array $in)
-    {
-        $posted = isset($in['posted']) && is_string($in['posted']) ? $in['posted'] : '';
-        $stored = isset($in['stored']) && is_string($in['stored']) ? $in['stored'] : '';
-        if (!empty($in['remove'])) {
-            return array('value' => '', 'error' => null);
-        }
-        if ($posted === '') {
-            return array('value' => $stored, 'error' => null);
-        }
-        if (self::isWebhookSecret($posted)) {
-            return array('value' => $posted, 'error' => null);
-        }
-        return array('value' => $stored, 'error' => 'bad_shape');
-    }
-
     // Enabling the extension (status 0 to 1) counts as going live for the mode in use, so its scopes are re-checked.
     public static function modeFlags($mode, $postedLive, $storedLive, $postedStatus, $storedStatus)
     {
@@ -192,6 +175,11 @@ class Restricted_Key
         $switched = $isLive !== (bool) $storedLive;
         $enabled = (bool) $postedStatus && !$storedStatus;
         return array('is_active' => $active, 'becoming_active' => $active && ($switched || $enabled));
+    }
+
+    private static function str(array $in, $k)
+    {
+        return isset($in[$k]) && is_string($in[$k]) ? $in[$k] : '';
     }
 
     private static function plan($action, $key, $public, $error)
@@ -247,10 +235,10 @@ class Restricted_Key
         return self::isPresent($probe, $status, $body) ? 'present' : 'indeterminate';
     }
 
-    private static function verdict($code, array $missing = array(), array $sensitive = array(), $reason = null)
+    private static function verdict($code, array $missing = array(), array $sensitive = array(), $reason = null, $log = '')
     {
         return array('code' => $code, 'missing' => $missing, 'sensitive' => $sensitive, 'reason' => $reason,
-            'public_key' => null, 'log' => '');
+            'public_key' => null, 'log' => $log);
     }
 
     // $results: list of ['probe' => probe, 'outcome' => string, 'status' => int], baseline first.
@@ -343,9 +331,7 @@ class Restricted_Key
 
     private static function timedOut()
     {
-        $v = self::verdict('unverifiable', array(), array(), 'transient');
-        $v['log'] = '-';
-        return $v;
+        return self::verdict('unverifiable', array(), array(), 'transient', '-');
     }
 
     public function validate(
@@ -359,24 +345,20 @@ class Restricted_Key
                 $deadlineAt = microtime(true) + self::OVERALL_DEADLINE;
             }
             if ($mode !== 'test' && $mode !== 'live') {
-                $v = self::verdict('wrong_mode');
-                $v['log'] = '-';
-                return $v;
+                return self::verdict('wrong_mode', array(), array(), null, '-');
             }
-            if (self::keyKind($key) !== 'rk') {
-                $v = self::verdict('invalid_key');
-                $v['log'] = '-';
-                return $v;
+            $kind = self::keyKind($key);
+            if ($kind !== 'rk') {
+                return self::verdict('invalid_key', array(), array(), null, '-');
             }
-            if (self::keyMode($key) !== $mode) {
-                $v = self::verdict('wrong_mode');
-                $v['log'] = '-';
-                return $v;
+            if (self::keyMode($key, $kind) !== $mode) {
+                return self::verdict('wrong_mode', array(), array(), null, '-');
             }
 
             $probes = self::probes();
             $baselineProbe = array_shift($probes);
             $results = array();
+            $identBody = '';
 
             if ($deadlineAt - microtime(true) <= 0) {
                 return self::timedOut();
@@ -385,7 +367,7 @@ class Restricted_Key
             $r = $res[$baselineProbe['scope']];
             $baseline = self::classify($baselineProbe, $r['status'], $r['body'], null);
             $results[] = array('probe' => $baselineProbe, 'outcome' => $baseline, 'status' => $r['status'],
-                'errno' => $r['errno'], 'body' => '');
+                'errno' => $r['errno']);
 
             // An absent baseline still proves the key is valid, so every other scope can be named.
             if ($baseline === 'present' || $baseline === 'absent') {
@@ -400,19 +382,16 @@ class Restricted_Key
                 foreach ($probes as $p) {
                     $r = $res[$p['scope']];
                     $results[] = array('probe' => $p, 'outcome' => self::classify($p, $r['status'], $r['body'], $baseline),
-                        'status' => $r['status'], 'errno' => $r['errno'],
-                        'body' => $p['scope'] === self::IDENT_SCOPE ? $r['body'] : '');
+                        'status' => $r['status'], 'errno' => $r['errno']);
+                    if ($p['scope'] === self::IDENT_SCOPE) {
+                        $identBody = $r['body'];
+                    }
                 }
             }
 
             $verdict = self::decide($results);
             if ($verdict['code'] === 'ok') {
-                $pk = null;
-                foreach ($results as $r) {
-                    if ($r['probe']['scope'] === self::IDENT_SCOPE) {
-                        $pk = self::parseIdent($r['body'], $mode);
-                    }
-                }
+                $pk = self::parseIdent($identBody, $mode);
                 if ($pk === null) {
                     $verdict = self::verdict('account');
                 } else {
@@ -427,9 +406,7 @@ class Restricted_Key
             $verdict['log'] = implode(',', $log);
             return $verdict;
         } catch (\Throwable $e) {
-            $v = self::verdict('unverifiable', array(), array(), 'transient');
-            $v['log'] = '-';
-            return $v;
+            return self::timedOut();
         }
     }
 }

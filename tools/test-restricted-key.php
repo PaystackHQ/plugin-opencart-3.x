@@ -1,37 +1,12 @@
 <?php
 
-if (PHP_SAPI !== 'cli') {
-    http_response_code(404);
-    exit(1);
-}
-
+require __DIR__ . '/bootstrap.php';
 require __DIR__ . '/../system/library/paystack/http.php';
 require __DIR__ . '/../system/library/paystack/restricted_key.php';
+require __DIR__ . '/../system/library/paystack/webhook.php';
 
 use Paystack\Restricted_Key as RK;
-
-$pass = 0;
-$fail = 0;
-
-function check($name, $cond)
-{
-    global $pass, $fail;
-    if ($cond) {
-        $pass++;
-    } else {
-        $fail++;
-        echo "FAIL: $name\n";
-    }
-}
-
-function same($name, $actual, $expected)
-{
-    $ok = $actual === $expected;
-    check($name, $ok);
-    if (!$ok) {
-        echo '  expected ' . var_export($expected, true) . "\n  actual   " . var_export($actual, true) . "\n";
-    }
-}
+use Paystack\Webhook as WH;
 
 $DENIED = '{"status":false,"message":"This restricted key is not permitted to perform this action"}';
 $STUB = '{"status":false,"message":"Sorry, this feature is no longer available."}';
@@ -516,7 +491,7 @@ same('bad posted key does not fall back to stored', act($p), array('reject', 'ba
 // planWebhookSecret
 $WS = 'whsec_abc123';
 $wsp = function (array $over) {
-    return RK::planWebhookSecret(array_merge(array('posted' => '', 'stored' => '', 'remove' => false), $over));
+    return WH::planWebhookSecret(array_merge(array('posted' => '', 'stored' => '', 'remove' => false), $over));
 };
 same('whsec blank keeps stored', $wsp(array('stored' => $WS)), array('value' => $WS, 'error' => null));
 same('whsec blank nothing stored', $wsp(array()), array('value' => '', 'error' => null));
@@ -608,5 +583,4 @@ same('Http with no requests returns nothing', \Paystack\Http::request(array(), 1
 check('default requester is callable', is_callable(array('Paystack\Http', 'request')));
 check('base url is https only', strpos(\Paystack\Http::BASE_URL, 'https://') === 0);
 
-echo "\n$pass passed, $fail failed\n";
-exit($fail === 0 ? 0 : 1);
+finish();

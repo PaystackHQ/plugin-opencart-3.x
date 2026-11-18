@@ -8,6 +8,7 @@ class Http
     const CONCURRENCY = 5;
     const DEFAULT_TIMEOUT = 4;
     const CONNECT_TIMEOUT = 3;
+    const FAILED = array('status' => 0, 'body' => '', 'errno' => -1);
 
     // Results never carry curl_error() text: it can echo request details.
     // Request: id, method, path, body, key and an optional per-request timeout in seconds.
@@ -50,6 +51,7 @@ class Http
                 $active[$req['id']] = $ch;
             }
 
+            $completed = false;
             curl_multi_exec($mh, $running);
             while ($info = curl_multi_info_read($mh)) {
                 $ch = $info['handle'];
@@ -61,6 +63,7 @@ class Http
                 );
                 self::release($mh, $ch);
                 unset($active[$id]);
+                $completed = true;
             }
 
             if (!$active && !$queue) {
@@ -69,6 +72,9 @@ class Http
             if (microtime(true) >= $end) {
                 break;
             }
+            if ($completed && $queue) {
+                continue;
+            }
             if (curl_multi_select($mh, 0.2) === -1) {
                 usleep(10000);
             }
@@ -76,10 +82,10 @@ class Http
 
         foreach ($active as $id => $ch) {
             self::release($mh, $ch);
-            $out[$id] = array('status' => 0, 'body' => '', 'errno' => -1);
+            $out[$id] = self::FAILED;
         }
         foreach ($queue as $req) {
-            $out[$req['id']] = array('status' => 0, 'body' => '', 'errno' => -1);
+            $out[$req['id']] = self::FAILED;
         }
         curl_multi_close($mh);
         return $out;

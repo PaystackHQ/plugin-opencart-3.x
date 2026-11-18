@@ -1,27 +1,9 @@
 <?php
 
-if (PHP_SAPI !== 'cli') {
-    http_response_code(404);
-    exit(1);
-}
-
+require __DIR__ . '/bootstrap.php';
 require __DIR__ . '/../system/library/paystack/payment.php';
 
 use Paystack\Payment as P;
-
-$pass = 0;
-$fail = 0;
-
-function same($name, $actual, $expected)
-{
-    global $pass, $fail;
-    if ($actual === $expected) {
-        $pass++;
-    } else {
-        $fail++;
-        echo "FAIL: $name\n  expected: " . var_export($expected, true) . "\n  actual:   " . var_export($actual, true) . "\n";
-    }
-}
 
 const REF = '42-5f3a9c1b2d4e6';
 
@@ -143,5 +125,4 @@ same('verified abandoned', P::isVerifiedSuccess(array('status' => true, 'data' =
 same('verified status false', P::isVerifiedSuccess(array('status' => false, 'data' => array('reference' => REF, 'status' => 'success')), REF), false);
 same('verified null', P::isVerifiedSuccess(null, REF), false);
 
-echo "passed: $pass, failed: $fail\n";
-exit($fail ? 1 : 0);
+finish();

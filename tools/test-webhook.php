@@ -1,28 +1,10 @@
 <?php
 
-if (PHP_SAPI !== 'cli') {
-    http_response_code(404);
-    exit(1);
-}
-
+require __DIR__ . '/bootstrap.php';
 require __DIR__ . '/../system/library/paystack/restricted_key.php';
 require __DIR__ . '/../system/library/paystack/webhook.php';
 
 use Paystack\Webhook as WH;
-
-$pass = 0;
-$fail = 0;
-
-function same($name, $actual, $expected)
-{
-    global $pass, $fail;
-    if ($actual === $expected) {
-        $pass++;
-    } else {
-        $fail++;
-        echo "FAIL: $name\n  expected: " . var_export($expected, true) . "\n  actual:   " . var_export($actual, true) . "\n";
-    }
-}
 
 $now = 1700000000;
 $body = '{"event":"charge.success","data":{"reference":"42-5f3a9c1b2d4e6"}}';
@@ -84,5 +66,4 @@ same('t over 15 digits', WH::verifySignature('t=1' . str_repeat('0', 15) . ',v1=
 same('signature over a different timestamp', WH::verifySignature('t=' . $now . ',v1=k1:' . sig($now + 1, $body, $whsec), $body, $whsec, $now), false);
 same('whitespace around parts', WH::verifySignature('t=' . $now . ' , v1=k1:' . sig($now, $body, $whsec), $body, $whsec, $now), true);
 
-echo "passed: $pass, failed: $fail\n";
-exit($fail ? 1 : 0);
+finish();

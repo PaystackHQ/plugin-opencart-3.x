@@ -53,7 +53,6 @@ $_['help_total']            = 'The checkout total the order must reach before th
 $_['help_secret']           = 'Paste a secret key (sk_) or a restricted key (rk_). A restricted key needs only Account: read and Transactions: read. Keys with Transactions: write or any permission that moves money are refused. The saved key is never shown; leave the field blank to keep it.';
 $_['help_public']           = 'Filled in automatically from Paystack when you use a restricted key. Required when you use a secret key.';
 $_['help_webhook_secret']    = 'The whsec_ signing secret shown next to your webhook URL on the Paystack Dashboard. The saved secret is never shown; leave the field blank to keep it.';
-$_['help_remove']           = 'A blank key field keeps the saved key. Tick this to delete it instead (not possible for the mode in use).';
 
 // Error
 $_['error_permission']      = 'Warning: You do not have permission to modify the Paystack extension!';

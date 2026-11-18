@@ -50,6 +50,11 @@ class ControllerExtensionPaymentPaystack extends Controller
         return intval($this->currency->format($order_info['total'] * 100, $order_info['currency_code'], $order_info['currency_value'], false));
     }
 
+    private function active_setting($suffix)
+    {
+        return $this->config->get('payment_paystack_' . ($this->config->get('payment_paystack_live') ? 'live' : 'test') . '_' . $suffix);
+    }
+
     public function index()
     {
         $this->load->model('checkout/order');
@@ -61,11 +66,7 @@ class ControllerExtensionPaymentPaystack extends Controller
         $data['text_testmode'] = $this->language->get('text_testmode');
         $data['livemode'] = $this->config->get('payment_paystack_live');
 
-        if ($this->config->get('payment_paystack_live')) {
-            $data['key'] = $this->config->get('payment_paystack_live_public');
-        } else {
-            $data['key'] = $this->config->get('payment_paystack_test_public');
-        }
+        $data['key'] = $this->active_setting('public');
 
         $order_info = $this->model_checkout_order->getOrder($this->session->data['order_id']);
 
@@ -80,18 +81,12 @@ class ControllerExtensionPaymentPaystack extends Controller
 
     private function query_api_transaction_verify($reference)
     {
-        if ($this->config->get('payment_paystack_live')) {
-            $skey = $this->config->get('payment_paystack_live_secret');
-        } else {
-            $skey = $this->config->get('payment_paystack_test_secret');
-        }
-
         $res = \Paystack\Http::request(array(array(
             'id' => 'verify',
             'method' => 'GET',
             'path' => 'transaction/verify/' . rawurlencode($reference),
             'body' => null,
-            'key' => (string) $skey,
+            'key' => (string) $this->active_setting('secret'),
             'timeout' => 15,
         )), 16);
         $status = $res['verify']['status'];
@@ -106,8 +101,9 @@ class ControllerExtensionPaymentPaystack extends Controller
         foreach ($keys as $key) {
             $value = $this->config->get($key);
             foreach (is_array($value) ? $value : array($value) as $id) {
-                if ($id !== null && $id !== '' && $id !== false) {
-                    $ids[] = (int) $id;
+                $id = \Paystack\Payment::statusId($id);
+                if ($id !== null) {
+                    $ids[] = $id;
                 }
             }
         }
@@ -156,7 +152,7 @@ class ControllerExtensionPaymentPaystack extends Controller
         if ($gate === 'ignore' || ($gate === 'already_paid' && $trusted)) {
             return $gate;
         }
-        if ($gate === 'proceed' && ($paid_status === null || $paid_status === '' || $paid_status === false)) {
+        if ($gate === 'proceed' && \Paystack\Payment::statusId($paid_status) === null) {
             if ($this->config->get('payment_paystack_debug')) {
                 $this->log->write('PAYSTACK :: ORDER ' . (int) $order_id . ' not updated: no paid order status is configured');
             }
@@ -220,12 +216,7 @@ class ControllerExtensionPaymentPaystack extends Controller
         }
 
         if ($decision === 'paid') {
-            if ($this->config->get('payment_paystack_live')) {
-                $pk = $this->config->get('payment_paystack_live_public');
-            } else {
-                $pk = $this->config->get('payment_paystack_test_public');
-            }
-            $pstk_logger = new open_cart_paystack_plugin_tracker('opencart-3.x', $pk);
+            $pstk_logger = new open_cart_paystack_plugin_tracker('opencart-3.x', $this->active_setting('public'));
             $pstk_logger->log_transaction_success($reference);
         }
 
@@ -244,9 +235,8 @@ class ControllerExtensionPaymentPaystack extends Controller
     private function handle_webhook()
     {
         $input = (string) @file_get_contents('php://input');
-        $mode = $this->config->get('payment_paystack_live') ? 'live' : 'test';
-        $secret_key = (string) $this->config->get('payment_paystack_' . $mode . '_secret');
-        $whsec = (string) $this->config->get('payment_paystack_' . $mode . '_webhook_secret');
+        $secret_key = (string) $this->active_setting('secret');
+        $whsec = (string) $this->active_setting('webhook_secret');
         $debug = $this->config->get('payment_paystack_debug');
 
         if (!\Paystack\Webhook::isWebhookAuthentic($input, $whsec, $secret_key, $_SERVER, time())) {

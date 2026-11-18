@@ -45,6 +45,22 @@ class Webhook
         return $ok;
     }
 
+    public static function planWebhookSecret(array $in)
+    {
+        $posted = isset($in['posted']) && is_string($in['posted']) ? $in['posted'] : '';
+        $stored = isset($in['stored']) && is_string($in['stored']) ? $in['stored'] : '';
+        if (!empty($in['remove'])) {
+            return array('value' => '', 'error' => null);
+        }
+        if ($posted === '') {
+            return array('value' => $stored, 'error' => null);
+        }
+        if (Restricted_Key::isWebhookSecret($posted)) {
+            return array('value' => $posted, 'error' => null);
+        }
+        return array('value' => $stored, 'error' => 'bad_shape');
+    }
+
     public static function isWebhookAuthentic(
         $input,
         #[\SensitiveParameter]
