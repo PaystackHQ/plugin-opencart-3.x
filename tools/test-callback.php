@@ -117,5 +117,25 @@ same('gate paid', P::statusGate(2, array(0, 1), array(2, 1, 5)), 'already_paid')
 same('gate complete', P::statusGate(5, array(0, 1), array(2, 1, 5)), 'already_paid');
 same('gate merchant canceled', P::statusGate(7, array(0, 1), array(2, 1, 5)), 'ignore');
 
+// Gate regressions: pending is unpaid even when listed as a processing status; the paid status never is
+same('gate pending in both lists proceeds', P::statusGate(1, array(0, 1), array(1)), 'proceed');
+same('gate status 0 in paid list still proceeds', P::statusGate(0, array(0), array(0, 5)), 'proceed');
+same('gate is strict about types', P::statusGate('1', array(0, 1), array(5)), 'ignore');
+same('gate empty lists ignore', P::statusGate(1, array(), array()), 'ignore');
+same('gate paid-only status when pending equals paid', P::statusGate(5, P::unpaidStatusIds(5, 5), array(5)), 'already_paid');
+same('gate pending==paid: status 0 proceeds', P::statusGate(0, P::unpaidStatusIds(5, 5), array(5)), 'proceed');
+same('unpaid ids never contain the paid status', in_array(5, P::unpaidStatusIds(5, '5'), true), false);
+same('unpaid ids string paid equals int pending', P::unpaidStatusIds('5', 5), array(0));
+same('decision: order already in paid status is ignore', decide(array('order_status_id' => 5, 'unpaid_status_ids' => P::unpaidStatusIds(5, 5))), 'ignore');
+same('decision: pending==paid, status 0 is paid', decide(array('order_status_id' => 0, 'unpaid_status_ids' => P::unpaidStatusIds(5, 5))), 'paid');
+
+// requested_amount is used only when amount >= requested_amount
+same('requested above amount, expected=amount is ignored, charged amount compared', decide(array('expected_amount' => 50), array('requested_amount' => 100, 'amount' => 50)), 'paid');
+same('requested above amount, expected=requested is mismatch', decide(array('expected_amount' => 100), array('requested_amount' => 100, 'amount' => 50)), 'mismatch');
+same('requested one above amount is not used', decide(array('expected_amount' => 500000), array('requested_amount' => 500001, 'amount' => 500000)), 'paid');
+same('requested one below amount is used', decide(array(), array('requested_amount' => 499999, 'amount' => 500000)), 'mismatch');
+same('requested zero with larger amount is mismatch', decide(array(), array('requested_amount' => 0, 'amount' => 500000)), 'mismatch');
+same('requested float is not trusted', decide(array(), array('requested_amount' => 500000.0, 'amount' => 500000)), 'paid');
+
 echo "passed: $pass, failed: $fail\n";
 exit($fail ? 1 : 0);

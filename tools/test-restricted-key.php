@@ -527,6 +527,25 @@ same('whsec remove beats a posted value', $wsp(array('remove' => true, 'posted' 
 same('whsec remove beats an invalid posted value', $wsp(array('remove' => true, 'posted' => 'nope')), array('value' => '', 'error' => null));
 same('whsec non-string inputs', $wsp(array('posted' => null, 'stored' => null)), array('value' => '', 'error' => null));
 
+// planMode: remaining branches
+$p = plan(array('stored' => $SK, 'posted_public' => 'junk', 'is_active' => false));
+same('keep_sk with a junk posted pk is refused', act($p), array('reject', 'bad_public_key'));
+$p = plan(array('stored' => $SK, 'posted_public' => $PK_LIVE, 'is_active' => true));
+same('keep_sk with a wrong-mode posted pk is refused', act($p), array('reject', 'bad_public_key'));
+$p = plan(array('stored' => $SK, 'posted_public' => '', 'is_active' => false));
+same('keep_sk inactive blank pk', array($p['action'], $p['public']), array('keep_sk', ''));
+$p = plan(array('remove' => true, 'stored' => $SK, 'posted_public' => $PK));
+same('clear drops any posted pk', array($p['action'], $p['public']), array('clear', ''));
+$p = plan(array('posted' => $RK, 'stored' => $RK, 'stored_public' => $PK, 'is_active' => false, 'becoming_active' => true));
+same('rk unchanged becoming active but inactive flag unset: probe', $p['action'], 'probe');
+$p = plan(array('posted' => 5, 'stored' => 7, 'posted_public' => array(), 'is_active' => false));
+same('non-string inputs behave as blank', act($p), array('empty', null));
+$p = plan(array('stored' => 'legacy-garbage', 'is_active' => false, 'posted_public' => $PK_LIVE));
+same('legacy keep_sk drops a wrong-mode posted pk', $p['public'], '');
+same('planWebhookSecret trailing newline is bad_shape', $wsp(array('posted' => "whsec_abc\n", 'stored' => $WS)), array('value' => $WS, 'error' => 'bad_shape'));
+same('planWebhookSecret bare prefix is bad_shape', $wsp(array('posted' => 'whsec_', 'stored' => '')), array('value' => '', 'error' => 'bad_shape'));
+same('planWebhookSecret sk-shaped is bad_shape', $wsp(array('posted' => 'sk_test_abc', 'stored' => $WS)), array('value' => $WS, 'error' => 'bad_shape'));
+
 // modeFlags
 same('flags: live mode, live posted, unchanged', RK::modeFlags('live', true, true, 1, 1), array('is_active' => true, 'becoming_active' => false));
 same('flags: test mode inactive when live posted', RK::modeFlags('test', true, true, 1, 1), array('is_active' => false, 'becoming_active' => false));
@@ -563,6 +582,27 @@ check('deadline is passed on as the time left', count($seen) === 2 && $seen[0] <
 $seen = array();
 $v = $rk->validate($KEY, 'test');
 check('default deadline is 20s', $v['code'] === 'ok' && $seen[0] <= 20 && $seen[0] > 19);
+
+// Deadline expiring between the baseline and the batch
+$calls = 0;
+$rk = new RK(function (array $requests, $deadline) use (&$calls) {
+    $calls++;
+    usleep(150000);
+    $m = goodResponses();
+    $out = array();
+    foreach ($requests as $req) {
+        $out[$req['id']] = $m[$req['id']];
+    }
+    return $out;
+});
+$v = $rk->validate($KEY, 'test', microtime(true) + 0.05);
+same('deadline expires after baseline: unverifiable, batch not sent', array($v['code'], $v['reason'], $calls), array('unverifiable', 'transient', 1));
+same('deadline expired: log placeholder', $v['log'], '-');
+$v = (new RK(stub()))->validate($KEY, 'test', 0.0);
+same('deadline of exactly zero is expired', $v['code'], 'unverifiable');
+
+// Http::request without network
+same('Http with no requests returns nothing', \Paystack\Http::request(array(), 1), array());
 
 // Default requester sanity: no network, only constructs
 check('default requester is callable', is_callable(array('Paystack\Http', 'request')));

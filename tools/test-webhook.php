@@ -65,5 +65,24 @@ same('rk with whsec valid', WH::isWebhookAuthentic($body, $whsec, $rk, array('HT
 same('empty secret', WH::isWebhookAuthentic($body, '', '', array('HTTP_X_PAYSTACK_SIGNATURE' => hash_hmac('sha512', $body, '')), $now), false);
 same('no headers', WH::isWebhookAuthentic($body, '', $sk, array(), $now), false);
 
+// whsec set: legacy header refused, missing/odd headers refused
+same('whsec set, no headers', WH::isWebhookAuthentic($body, $whsec, $sk, array(), $now), false);
+same('whsec set, new header non-string', WH::isWebhookAuthentic($body, $whsec, $sk, array('HTTP_PAYSTACK_SIGNATURE' => array($good)), $now), false);
+same('whsec set, new header bad', WH::isWebhookAuthentic($body, $whsec, $sk, array('HTTP_PAYSTACK_SIGNATURE' => 't=' . $now . ',v1=k1:00'), $now), false);
+same('whsec set, expired new header', WH::isWebhookAuthentic($body, $whsec, $sk, array('HTTP_PAYSTACK_SIGNATURE' => $good), $now + 301), false);
+same('whsec set, legacy valid for rk-less sk still refused', WH::isWebhookAuthentic($body, $whsec, $sk, $legacy + array('HTTP_PAYSTACK_SIGNATURE' => 'x'), $now), false);
+same('whsec non-string falls to legacy', WH::isWebhookAuthentic($body, null, $sk, $legacy, $now), true);
+same('non-string input', WH::isWebhookAuthentic(null, '', $sk, $legacy, $now), false);
+same('legacy header non-string', WH::isWebhookAuthentic($body, '', $sk, array('HTTP_X_PAYSTACK_SIGNATURE' => array('a')), $now), false);
+same('legacy non-key secret', WH::isWebhookAuthentic($body, '', 'junk', array('HTTP_X_PAYSTACK_SIGNATURE' => hash_hmac('sha512', $body, 'junk')), $now), false);
+same('verify empty secret', WH::verifySignature($good, $body, '', $now), false);
+same('verify non-string header', WH::verifySignature(null, $body, $whsec, $now), false);
+same('verify non-string input', WH::verifySignature($good, null, $whsec, $now), false);
+same('v1 without key prefix', WH::verifySignature('t=' . $now . ',v1=' . sig($now, $body, $whsec), $body, $whsec, $now), true);
+same('uppercase hex signature rejected', WH::verifySignature('t=' . $now . ',v1=k1:' . strtoupper(sig($now, $body, $whsec)), $body, $whsec, $now), false);
+same('t over 15 digits', WH::verifySignature('t=1' . str_repeat('0', 15) . ',v1=k1:' . sig('1' . str_repeat('0', 15), $body, $whsec), $body, $whsec, $now), false);
+same('signature over a different timestamp', WH::verifySignature('t=' . $now . ',v1=k1:' . sig($now + 1, $body, $whsec), $body, $whsec, $now), false);
+same('whitespace around parts', WH::verifySignature('t=' . $now . ' , v1=k1:' . sig($now, $body, $whsec), $body, $whsec, $now), true);
+
 echo "passed: $pass, failed: $fail\n";
 exit($fail ? 1 : 0);
