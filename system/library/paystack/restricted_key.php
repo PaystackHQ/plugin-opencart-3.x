@@ -465,4 +465,56 @@ class Restricted_Key
             curl_close($ch);
         }
     }
+
+    public static function parseReference($ref)
+    {
+        if (!is_string($ref) || !preg_match('/^([1-9]\d*)-[0-9a-f]{13}\z/', $ref, $m)) {
+            return null;
+        }
+        if (strlen($m[1]) > 18) {
+            return null;
+        }
+        return (int) $m[1];
+    }
+
+    public static function paymentDecision(array $in)
+    {
+        $response = isset($in['response']) ? $in['response'] : null;
+        if (!isset($in['http_status']) || $in['http_status'] !== 200 || !is_array($response)) {
+            return 'ignore';
+        }
+        if (!isset($response['status']) || $response['status'] !== true) {
+            return 'ignore';
+        }
+        $data = isset($response['data']) ? $response['data'] : null;
+        if (!is_array($data) || !isset($data['reference']) || !isset($in['reference'])
+            || !is_string($data['reference']) || $data['reference'] !== $in['reference']) {
+            return 'ignore';
+        }
+        $orderId = self::parseReference($in['reference']);
+        if ($orderId === null || $orderId !== $in['order_id']) {
+            return 'ignore';
+        }
+        if (!in_array($in['order_status_id'], $in['unpaid_status_ids'], true)) {
+            return 'ignore';
+        }
+        if (!isset($data['status']) || $data['status'] !== 'success') {
+            return 'not_paid';
+        }
+
+        $amount = null;
+        if (isset($data['requested_amount']) && is_int($data['requested_amount'])) {
+            $amount = $data['requested_amount'];
+        } elseif (isset($data['amount'])) {
+            $amount = $data['amount'];
+        }
+        if (!is_int($amount)) {
+            return 'ignore';
+        }
+        $currency = isset($data['currency']) && is_string($data['currency']) ? $data['currency'] : '';
+        if ($amount === $in['expected_amount'] && strtoupper($currency) === strtoupper($in['currency'])) {
+            return 'paid';
+        }
+        return 'mismatch';
+    }
 }
