@@ -63,7 +63,27 @@ class ControllerExtensionPaymentPaystack extends Controller
             $data['payment_paystack_test_public'] = $this->config->get('payment_paystack_test_public');
         }
 
+        if (isset($this->request->post['payment_paystack_live'])) {
+            $data['payment_paystack_live'] = $this->request->post['payment_paystack_live'];
+        } else {
+            $data['payment_paystack_live'] = $this->config->get('payment_paystack_live');
+        }
+
+        $data['webhook_warning'] = false;
         foreach (array('test', 'live') as $mode) {
+            $stored_whsec = $this->config->get('payment_paystack_' . $mode . '_webhook_secret');
+            $has_whsec = is_string($stored_whsec) && $stored_whsec !== '';
+            $whsec_last4 = \Paystack\Restricted_Key::last4($stored_whsec);
+            $data[$mode . '_has_webhook_secret'] = $has_whsec;
+            if (!$has_whsec) {
+                $data[$mode . '_webhook_placeholder'] = '';
+            } elseif ($whsec_last4 === null) {
+                $data[$mode . '_webhook_placeholder'] = $this->language->get('text_saved_whsec_short');
+            } else {
+                $data[$mode . '_webhook_placeholder'] = sprintf($this->language->get('text_saved_whsec'), $whsec_last4);
+            }
+            $data['error_webhook_' . $mode] = isset($this->error['webhook_' . $mode]) ? $this->error['webhook_' . $mode] : '';
+
             $stored = $this->config->get('payment_paystack_' . $mode . '_secret');
             $posted = isset($this->request->post['payment_paystack_' . $mode . '_secret'])
                 ? \Paystack\Restricted_Key::decodeField($this->request->post['payment_paystack_' . $mode . '_secret']) : '';
@@ -72,6 +92,9 @@ class ControllerExtensionPaymentPaystack extends Controller
 
             $data[$mode . '_has_key'] = is_string($stored) && $stored !== '';
             $data[$mode . '_uses_rk'] = $kind === 'rk';
+            if (($mode === 'live') === (bool) $data['payment_paystack_live'] && $kind === 'rk' && !$has_whsec) {
+                $data['webhook_warning'] = true;
+            }
             if (!$data[$mode . '_has_key']) {
                 $data[$mode . '_key_placeholder'] = '';
             } elseif ($last4 === null) {
@@ -80,12 +103,6 @@ class ControllerExtensionPaymentPaystack extends Controller
                 $type = \Paystack\Restricted_Key::keyKind($stored) === 'rk' ? 'text_saved_rk' : 'text_saved_sk';
                 $data[$mode . '_key_placeholder'] = sprintf($this->language->get($type), $last4);
             }
-        }
-
-        if (isset($this->request->post['payment_paystack_live'])) {
-            $data['payment_paystack_live'] = $this->request->post['payment_paystack_live'];
-        } else {
-            $data['payment_paystack_live'] = $this->config->get('payment_paystack_live');
         }
 
         if (isset($this->request->post['payment_paystack_debug'])) {
@@ -216,6 +233,21 @@ class ControllerExtensionPaymentPaystack extends Controller
             }
         }
 
+        $whsecs = array();
+        foreach (array('test', 'live') as $mode) {
+            $stored = (string) $this->config->get('payment_paystack_' . $mode . '_webhook_secret');
+            $posted = \Paystack\Restricted_Key::decodeField(isset($post['payment_paystack_' . $mode . '_webhook_secret']) ? $post['payment_paystack_' . $mode . '_webhook_secret'] : '');
+            if (!empty($post['payment_paystack_' . $mode . '_webhook_remove'])) {
+                $whsecs[$mode] = '';
+            } elseif ($posted === '') {
+                $whsecs[$mode] = $stored;
+            } elseif (\Paystack\Restricted_Key::isWebhookSecret($posted)) {
+                $whsecs[$mode] = $posted;
+            } else {
+                $this->error['webhook_' . $mode] = $this->language->get('error_webhook_secret');
+            }
+        }
+
         if ($this->error) {
             return false;
         }
@@ -254,6 +286,8 @@ class ControllerExtensionPaymentPaystack extends Controller
             $this->request->post['payment_paystack_' . $mode . '_secret'] = $plan['key'];
             $this->request->post['payment_paystack_' . $mode . '_public'] = $pk;
             unset($this->request->post['payment_paystack_' . $mode . '_remove']);
+            $this->request->post['payment_paystack_' . $mode . '_webhook_secret'] = $whsecs[$mode];
+            unset($this->request->post['payment_paystack_' . $mode . '_webhook_remove']);
         }
 
         return true;
