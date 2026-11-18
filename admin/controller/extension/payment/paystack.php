@@ -129,18 +129,6 @@ class ControllerExtensionPaymentPaystack extends Controller
             $data['payment_paystack_pending_status_id'] = $this->config->get('payment_paystack_pending_status_id');
         }
 
-        if (isset($this->request->post['payment_paystack_canceled_status_id'])) {
-            $data['payment_paystack_canceled_status_id'] = $this->request->post['payment_paystack_canceled_status_id'];
-        } else {
-            $data['payment_paystack_canceled_status_id'] = $this->config->get('payment_paystack_canceled_status_id');
-        }
-
-        if (isset($this->request->post['payment_paystack_failed_status_id'])) {
-            $data['payment_paystack_failed_status_id'] = $this->request->post['payment_paystack_failed_status_id'];
-        } else {
-            $data['payment_paystack_failed_status_id'] = $this->config->get('payment_paystack_failed_status_id');
-        }
-
         $this->load->model('localisation/order_status');
 
         $data['order_statuses'] = $this->model_localisation_order_status->getOrderStatuses();
@@ -209,10 +197,13 @@ class ControllerExtensionPaymentPaystack extends Controller
         $post = $this->request->post;
         $live_posted = !empty($post['payment_paystack_live']);
         $live_stored = (bool) $this->config->get('payment_paystack_live');
+        $status_posted = !empty($post['payment_paystack_status']);
+        $status_stored = (bool) $this->config->get('payment_paystack_status');
+        $deadline_at = microtime(true) + \Paystack\Restricted_Key::OVERALL_DEADLINE;
 
         $plans = array();
         foreach (array('test', 'live') as $mode) {
-            $active = ($mode === 'live') === $live_posted;
+            $flags = \Paystack\Restricted_Key::modeFlags($mode, $live_posted, $live_stored, $status_posted, $status_stored);
             $field = function ($name) use ($post, $mode) {
                 $key = 'payment_paystack_' . $mode . '_' . $name;
                 return \Paystack\Restricted_Key::decodeField(isset($post[$key]) ? $post[$key] : '');
@@ -223,8 +214,8 @@ class ControllerExtensionPaymentPaystack extends Controller
                 'stored_public' => (string) $this->config->get('payment_paystack_' . $mode . '_public'),
                 'posted_public' => $field('public'),
                 'mode' => $mode,
-                'is_active' => $active,
-                'becoming_active' => $active && ($mode === 'live') !== $live_stored,
+                'is_active' => $flags['is_active'],
+                'becoming_active' => $flags['becoming_active'],
                 'remove' => !empty($post['payment_paystack_' . $mode . '_remove']),
             ));
 
@@ -235,15 +226,13 @@ class ControllerExtensionPaymentPaystack extends Controller
 
         $whsecs = array();
         foreach (array('test', 'live') as $mode) {
-            $stored = (string) $this->config->get('payment_paystack_' . $mode . '_webhook_secret');
-            $posted = \Paystack\Restricted_Key::decodeField(isset($post['payment_paystack_' . $mode . '_webhook_secret']) ? $post['payment_paystack_' . $mode . '_webhook_secret'] : '');
-            if (!empty($post['payment_paystack_' . $mode . '_webhook_remove'])) {
-                $whsecs[$mode] = '';
-            } elseif ($posted === '') {
-                $whsecs[$mode] = $stored;
-            } elseif (\Paystack\Restricted_Key::isWebhookSecret($posted)) {
-                $whsecs[$mode] = $posted;
-            } else {
+            $secret_plan = \Paystack\Restricted_Key::planWebhookSecret(array(
+                'posted' => \Paystack\Restricted_Key::decodeField(isset($post['payment_paystack_' . $mode . '_webhook_secret']) ? $post['payment_paystack_' . $mode . '_webhook_secret'] : ''),
+                'stored' => (string) $this->config->get('payment_paystack_' . $mode . '_webhook_secret'),
+                'remove' => !empty($post['payment_paystack_' . $mode . '_webhook_remove']),
+            ));
+            $whsecs[$mode] = $secret_plan['value'];
+            if ($secret_plan['error'] !== null) {
                 $this->error['webhook_' . $mode] = $this->language->get('error_webhook_secret');
             }
         }
@@ -259,7 +248,7 @@ class ControllerExtensionPaymentPaystack extends Controller
             if ($plan['action'] !== 'probe') {
                 continue;
             }
-            $verdict = $library->validate($plan['key'], $mode);
+            $verdict = $library->validate($plan['key'], $mode, $deadline_at);
             if ($debug) {
                 $this->log->write('PAYSTACK :: rk check mode=' . $mode . ' code=' . $verdict['code'] . ' probes=' . $verdict['log']);
             }
@@ -276,13 +265,7 @@ class ControllerExtensionPaymentPaystack extends Controller
 
         // The only place a public key is chosen: restricted-key modes never trust the posted one.
         foreach ($plans as $mode => $plan) {
-            $pk = $plan['public'];
-            if (isset($public[$mode])) {
-                $pk = $public[$mode];
-            } elseif ($pk === null) {
-                $posted = \Paystack\Restricted_Key::decodeField(isset($post['payment_paystack_' . $mode . '_public']) ? $post['payment_paystack_' . $mode . '_public'] : '');
-                $pk = \Paystack\Restricted_Key::isPublicKey($posted, $mode) ? $posted : '';
-            }
+            $pk = isset($public[$mode]) ? $public[$mode] : $plan['public'];
             $this->request->post['payment_paystack_' . $mode . '_secret'] = $plan['key'];
             $this->request->post['payment_paystack_' . $mode . '_public'] = $pk;
             unset($this->request->post['payment_paystack_' . $mode . '_remove']);

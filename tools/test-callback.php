@@ -5,9 +5,9 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
-require __DIR__ . '/../system/library/paystack/restricted_key.php';
+require __DIR__ . '/../system/library/paystack/payment.php';
 
-use Paystack\Restricted_Key as RK;
+use Paystack\Payment as P;
 
 $pass = 0;
 $fail = 0;
@@ -30,7 +30,7 @@ function decide(array $over = array(), array $data = array(), array $resp = arra
     $in = array(
         'order_id' => 42,
         'order_status_id' => 0,
-        'unpaid_status_ids' => array(0, 1, 10, 7),
+        'unpaid_status_ids' => P::unpaidStatusIds(1, 5),
         'reference' => REF,
         'http_status' => 200,
         'response' => array_merge(array(
@@ -45,16 +45,18 @@ function decide(array $over = array(), array $data = array(), array $resp = arra
         'expected_amount' => 500000,
         'currency' => 'NGN',
     );
-    return RK::paymentDecision(array_merge($in, $over));
+    return P::paymentDecision(array_merge($in, $over));
 }
 
 same('paid', decide(), 'paid');
 same('paid from pending', decide(array('order_status_id' => 1)), 'paid');
-same('paid from failed status', decide(array('order_status_id' => 10)), 'paid');
-same('paid from canceled status', decide(array('order_status_id' => 7)), 'paid');
+same('paid from a status outside the unpaid set is ignore', decide(array('order_status_id' => 10)), 'ignore');
 same('requested_amount preferred', decide(array(), array('requested_amount' => 500000, 'amount' => 507500)), 'paid');
 same('fee case amount only is mismatch', decide(array(), array('amount' => 507500)), 'mismatch');
 same('requested_amount mismatch', decide(array(), array('requested_amount' => 100, 'amount' => 500000)), 'mismatch');
+same('requested_amount above amount is not trusted', decide(array('expected_amount' => 100), array('requested_amount' => 100, 'amount' => 50)), 'mismatch');
+same('requested_amount equal to amount', decide(array(), array('requested_amount' => 500000, 'amount' => 500000)), 'paid');
+same('requested_amount without int amount is ignore', decide(array(), array('requested_amount' => 500000, 'amount' => '500000')), 'ignore');
 same('non-int requested_amount falls back to amount', decide(array(), array('requested_amount' => '500000')), 'paid');
 same('amount mismatch', decide(array(), array('amount' => 100)), 'mismatch');
 same('currency mismatch', decide(array(), array('currency' => 'GHS')), 'mismatch');
@@ -86,18 +88,34 @@ same('amount string', decide(array(), array('amount' => '500000')), 'ignore');
 same('amount float', decide(array(), array('amount' => 500000.0)), 'ignore');
 same('amount missing', decide(array(), array('amount' => null)), 'ignore');
 
-same('parse valid', RK::parseReference(REF), 42);
-same('parse big id', RK::parseReference('1234567-0123456789abc'), 1234567);
-same('parse leading zero', RK::parseReference('01-5f3a9c1b2d4e6'), null);
-same('parse zero', RK::parseReference('0-5f3a9c1b2d4e6'), null);
-same('parse sign', RK::parseReference('+1-5f3a9c1b2d4e6'), null);
-same('parse no dash', RK::parseReference('425f3a9c1b2d4e6'), null);
-same('parse empty', RK::parseReference(''), null);
-same('parse array', RK::parseReference(array(REF)), null);
-same('parse null', RK::parseReference(null), null);
-same('parse int', RK::parseReference(42), null);
-same('parse trailing newline', RK::parseReference(REF . "\n"), null);
-same('parse overflow id', RK::parseReference('99999999999999999999-5f3a9c1b2d4e6'), null);
+same('unpaid ids default', P::unpaidStatusIds(1, 5), array(0, 1));
+same('unpaid ids strings', P::unpaidStatusIds('1', '5'), array(0, 1));
+same('unpaid ids pending is paid', P::unpaidStatusIds(5, 5), array(0));
+same('unpaid ids pending empty', P::unpaidStatusIds('', 5), array(0));
+same('unpaid ids pending null', P::unpaidStatusIds(null, 5), array(0));
+same('unpaid ids pending false', P::unpaidStatusIds(false, 5), array(0));
+same('unpaid ids paid empty keeps pending', P::unpaidStatusIds(1, ''), array(0, 1));
+same('unpaid ids pending zero is deduped', P::unpaidStatusIds(0, 5), array(0));
+same('unpaid ids both empty', P::unpaidStatusIds(null, null), array(0));
+
+same('parse valid', P::parseReference(REF), 42);
+same('parse big id', P::parseReference('1234567-0123456789abc'), 1234567);
+same('parse leading zero', P::parseReference('01-5f3a9c1b2d4e6'), null);
+same('parse zero', P::parseReference('0-5f3a9c1b2d4e6'), null);
+same('parse sign', P::parseReference('+1-5f3a9c1b2d4e6'), null);
+same('parse no dash', P::parseReference('425f3a9c1b2d4e6'), null);
+same('parse empty', P::parseReference(''), null);
+same('parse array', P::parseReference(array(REF)), null);
+same('parse null', P::parseReference(null), null);
+same('parse int', P::parseReference(42), null);
+same('parse trailing newline', P::parseReference(REF . "\n"), null);
+same('parse overflow id', P::parseReference('99999999999999999999-5f3a9c1b2d4e6'), null);
+
+same('gate new order', P::statusGate(0, array(0, 1), array(2, 1, 5)), 'proceed');
+same('gate pending beats processing', P::statusGate(1, array(0, 1), array(2, 1, 5)), 'proceed');
+same('gate paid', P::statusGate(2, array(0, 1), array(2, 1, 5)), 'already_paid');
+same('gate complete', P::statusGate(5, array(0, 1), array(2, 1, 5)), 'already_paid');
+same('gate merchant canceled', P::statusGate(7, array(0, 1), array(2, 1, 5)), 'ignore');
 
 echo "passed: $pass, failed: $fail\n";
 exit($fail ? 1 : 0);

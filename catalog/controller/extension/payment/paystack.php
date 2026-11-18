@@ -43,8 +43,6 @@ class open_cart_paystack_plugin_tracker
 }
 
 
-require_once DIR_SYSTEM . 'library/paystack/restricted_key.php';
-
 class ControllerExtensionPaymentPaystack extends Controller
 {
     private function expected_amount($order_info)
@@ -88,13 +86,14 @@ class ControllerExtensionPaymentPaystack extends Controller
             $skey = $this->config->get('payment_paystack_test_secret');
         }
 
-        $res = \Paystack\Restricted_Key::curlRequester(array(array(
+        $res = \Paystack\Http::request(array(array(
             'id' => 'verify',
             'method' => 'GET',
             'path' => 'transaction/verify/' . rawurlencode($reference),
             'body' => null,
             'key' => (string) $skey,
-        )), 10);
+            'timeout' => 15,
+        )), 16);
         $status = $res['verify']['status'];
         $decoded = json_decode($res['verify']['body'], true);
 
@@ -106,82 +105,123 @@ class ControllerExtensionPaymentPaystack extends Controller
         $ids = array();
         foreach ($keys as $key) {
             $value = $this->config->get($key);
-            if ($value !== null && $value !== '' && $value !== false) {
-                $ids[] = (int) $value;
+            foreach (is_array($value) ? $value : array($value) as $id) {
+                if ($id !== null && $id !== '' && $id !== false) {
+                    $ids[] = (int) $id;
+                }
             }
         }
         return $ids;
     }
 
+    private function note_is_latest_comment($order_id, $note)
+    {
+        $query = $this->db->query("SELECT `comment` FROM `" . DB_PREFIX . "order_history` WHERE order_id = '" . (int) $order_id . "' ORDER BY date_added DESC, order_history_id DESC LIMIT 1");
+        return $query->num_rows > 0 && $query->row['comment'] === $note;
+    }
+
+    private function record_mismatch($order_info, $current, $verified)
+    {
+        $order_id = (int) $order_info['order_id'];
+        $data = isset($verified['data']) && is_array($verified['data']) ? $verified['data'] : array();
+        $amount = isset($data['amount']) && is_int($data['amount']) ? $data['amount'] : '-';
+        $requested = isset($data['requested_amount']) && is_int($data['requested_amount']) ? $data['requested_amount'] : '-';
+        $currency = isset($data['currency']) && is_string($data['currency']) ? preg_replace('/[^A-Za-z]/', '', substr($data['currency'], 0, 8)) : '-';
+        $this->log->write('PAYSTACK :: ORDER ' . $order_id . ' MISMATCH expected ' . $this->expected_amount($order_info) . ' ' . $order_info['currency_code'] . ', got amount ' . $amount . ' requested_amount ' . $requested . ' ' . $currency);
+
+        $note = "Paystack payment did not match this order's amount or currency; check it in your Paystack Dashboard.";
+        if ($current === 0) {
+            // A status 0 order is hidden in the admin, so move it to pending where the note can be seen.
+            $pending = $this->config->get('payment_paystack_pending_status_id');
+            if ($pending !== null && $pending !== '' && $pending !== false) {
+                $this->model_checkout_order->addOrderHistory($order_id, (int) $pending, $note, false);
+            }
+        } elseif (!$this->note_is_latest_comment($order_id, $note)) {
+            $this->model_checkout_order->addOrderHistory($order_id, $current, $note, false);
+        }
+    }
+
     private function apply_verified_payment($order_id, $reference)
     {
-        $lock = 'paystack_order_' . DB_PREFIX . $order_id;
+        $this->load->model('checkout/order');
+        $order_info = $this->model_checkout_order->getOrder($order_id);
+        if (!$order_info) {
+            return 'ignore';
+        }
+
+        $paid_status = $this->config->get('payment_paystack_order_status_id');
+        $paid_ids = $this->configured_status_ids(array('payment_paystack_order_status_id', 'config_processing_status', 'config_complete_status'));
+        $unpaid = \Paystack\Payment::unpaidStatusIds($this->config->get('payment_paystack_pending_status_id'), $paid_status);
+        $current = (int) $order_info['order_status_id'];
+
+        $gate = \Paystack\Payment::statusGate($current, $unpaid, $paid_ids);
+        if ($gate !== 'proceed') {
+            return $gate;
+        }
+        if ($paid_status === null || $paid_status === '' || $paid_status === false) {
+            $this->log->write('PAYSTACK :: ORDER ' . (int) $order_id . ' not updated: no paid order status is configured');
+            return 'unverified';
+        }
+
+        try {
+            $verify = $this->query_api_transaction_verify($reference);
+        } catch (\Throwable $e) {
+            return 'unverified';
+        }
+        // Paystack answers an unknown reference with 404: a final answer, so the webhook must not be retried.
+        if ($verify['status'] === 404 && is_array($verify['body']) && isset($verify['body']['status']) && $verify['body']['status'] === false) {
+            return 'ignore';
+        }
+        if ($verify['status'] !== 200 || $verify['body'] === null) {
+            return 'unverified';
+        }
+
+        $lock = 'pstk_' . substr(sha1(DB_DATABASE . DB_PREFIX), 0, 16) . '_' . (int) $order_id;
         $row = $this->db->query("SELECT GET_LOCK('" . $this->db->escape($lock) . "', 10) AS l");
         if (!isset($row->row['l']) || (int) $row->row['l'] !== 1) {
             return 'unverified';
         }
 
         try {
-            $this->load->model('checkout/order');
             $order_info = $this->model_checkout_order->getOrder($order_id);
             if (!$order_info) {
-                return 'ignore';
-            }
+                $decision = 'ignore';
+            } elseif (($gate = \Paystack\Payment::statusGate((int) $order_info['order_status_id'], $unpaid, $paid_ids)) !== 'proceed') {
+                $decision = $gate;
+            } else {
+                $current = (int) $order_info['order_status_id'];
+                $decision = \Paystack\Payment::paymentDecision(array(
+                    'order_id' => (int) $order_id,
+                    'order_status_id' => $current,
+                    'unpaid_status_ids' => $unpaid,
+                    'reference' => $reference,
+                    'http_status' => $verify['status'],
+                    'response' => $verify['body'],
+                    'expected_amount' => $this->expected_amount($order_info),
+                    'currency' => $order_info['currency_code'],
+                ));
 
-            $verify = $this->query_api_transaction_verify($reference);
-            // Paystack answers an unknown reference with 404: a final answer, so the webhook must not be retried.
-            if ($verify['status'] === 404) {
-                return 'ignore';
-            }
-            if ($verify['status'] !== 200 || $verify['body'] === null) {
-                return 'unverified';
-            }
-
-            $unpaid = array_merge(array(0), $this->configured_status_ids(array(
-                'config_order_status_id',
-                'payment_paystack_pending_status_id',
-                'payment_paystack_failed_status_id',
-                'payment_paystack_canceled_status_id',
-            )));
-            $current = (int) $order_info['order_status_id'];
-
-            $decision = \Paystack\Restricted_Key::paymentDecision(array(
-                'order_id' => (int) $order_id,
-                'order_status_id' => $current,
-                'unpaid_status_ids' => $unpaid,
-                'reference' => $reference,
-                'http_status' => $verify['status'],
-                'response' => $verify['body'],
-                'expected_amount' => $this->expected_amount($order_info),
-                'currency' => $order_info['currency_code'],
-            ));
-
-            if ($decision === 'paid') {
-                $paid_status = $this->config->get('payment_paystack_order_status_id');
-                if ($paid_status !== null && $paid_status !== '' && $paid_status !== false) {
+                if ($decision === 'paid') {
                     $this->model_checkout_order->addOrderHistory($order_id, (int) $paid_status);
-
-                    if ($this->config->get('payment_paystack_live')) {
-                        $pk = $this->config->get('payment_paystack_live_public');
-                    } else {
-                        $pk = $this->config->get('payment_paystack_test_public');
-                    }
-                    $pstk_logger = new open_cart_paystack_plugin_tracker('opencart-3.x', $pk);
-                    $pstk_logger->log_transaction_success($reference);
-                }
-            } elseif ($decision === 'mismatch') {
-                // OpenCart treats a status 0 history entry specially, so only annotate real statuses
-                if ($current !== 0) {
-                    $this->model_checkout_order->addOrderHistory($order_id, $current, "Paystack payment did not match this order's amount or currency; check it in your Paystack Dashboard.", false);
-                } elseif ($this->config->get('payment_paystack_debug')) {
-                    $this->log->write('PAYSTACK :: ORDER ' . (int) $order_id . ' MISMATCH (status 0, no history written)');
+                } elseif ($decision === 'mismatch') {
+                    $this->record_mismatch($order_info, $current, $verify['body']);
                 }
             }
-
-            return $decision;
         } finally {
             $this->db->query("SELECT RELEASE_LOCK('" . $this->db->escape($lock) . "')");
         }
+
+        if ($decision === 'paid') {
+            if ($this->config->get('payment_paystack_live')) {
+                $pk = $this->config->get('payment_paystack_live_public');
+            } else {
+                $pk = $this->config->get('payment_paystack_test_public');
+            }
+            $pstk_logger = new open_cart_paystack_plugin_tracker('opencart-3.x', $pk);
+            $pstk_logger->log_transaction_success($reference);
+        }
+
+        return $decision;
     }
 
     private function redir_and_die($url, $onlymeta = false)
@@ -201,7 +241,7 @@ class ControllerExtensionPaymentPaystack extends Controller
         $whsec = (string) $this->config->get('payment_paystack_' . $mode . '_webhook_secret');
         $debug = $this->config->get('payment_paystack_debug');
 
-        if (!\Paystack\Restricted_Key::isWebhookAuthentic($input, $whsec, $secret_key, $_SERVER, time())) {
+        if (!\Paystack\Webhook::isWebhookAuthentic($input, $whsec, $secret_key, $_SERVER, time())) {
             if ($debug) {
                 $this->log->write('PAYSTACK :: WEBHOOK rejected: authentication failed');
             }
@@ -217,7 +257,7 @@ class ControllerExtensionPaymentPaystack extends Controller
 
         if ($name === 'charge.success' && isset($event['data']) && is_array($event['data'])
             && isset($event['data']['reference']) && is_string($event['data']['reference'])) {
-            $order_id = \Paystack\Restricted_Key::parseReference($event['data']['reference']);
+            $order_id = \Paystack\Payment::parseReference($event['data']['reference']);
             if ($order_id !== null) {
                 $decision = $this->apply_verified_payment($order_id, $event['data']['reference']);
                 if ($decision === 'unverified') {
@@ -240,7 +280,7 @@ class ControllerExtensionPaymentPaystack extends Controller
             $decision = 'ignore';
 
             if (is_string($trxref)) {
-                $order_id = \Paystack\Restricted_Key::parseReference($trxref);
+                $order_id = \Paystack\Payment::parseReference($trxref);
                 if ($order_id !== null) {
                     $decision = $this->apply_verified_payment($order_id, $trxref);
                     if ($this->config->get('payment_paystack_debug')) {
@@ -249,7 +289,7 @@ class ControllerExtensionPaymentPaystack extends Controller
                 }
             }
 
-            if ($decision === 'paid') {
+            if ($decision === 'paid' || $decision === 'already_paid') {
                 $redir_url = $this->url->link('checkout/success');
             } else {
                 $redir_url = $this->url->link('checkout/checkout', '', 'SSL');

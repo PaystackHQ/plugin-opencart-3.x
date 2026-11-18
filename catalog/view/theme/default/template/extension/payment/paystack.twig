@@ -10,15 +10,16 @@
     </div>
   </div>
 </form>
- 
+
+{% set json_flags = constant('JSON_HEX_TAG') b-or constant('JSON_HEX_AMP') b-or constant('JSON_HEX_APOS') b-or constant('JSON_HEX_QUOT') %}
 <script>
   function payWithPaystack(){
     var handler = PaystackPop.setup({
-      key: {{ key|json_encode }},
-      currency: {{ currency|json_encode }},
-      email: {{ email|json_encode }},
+      key: {{ key|json_encode(json_flags) }},
+      currency: {{ currency|json_encode(json_flags) }},
+      email: {{ email|json_encode(json_flags) }},
       amount: {{amount}},
-      ref: {{ ref|json_encode }},
+      ref: {{ ref|json_encode(json_flags) }},
       metadata:{
          "custom_fields":[
             {
@@ -29,10 +30,10 @@
           ]
       },
       callback: function(response){
-          window.location.href={{ callback|json_encode }}.replace(/&amp;/g, '&');
+          window.location.href={{ callback|json_encode(json_flags) }}.replace(/&amp;/g, '&');
       },
       onClose: function(){
-          window.location.href={{ callback|json_encode }}.replace(/&amp;/g, '&');
+          window.location.href={{ callback|json_encode(json_flags) }}.replace(/&amp;/g, '&');
       }
     });
     handler.openIframe();

@@ -68,19 +68,19 @@ Every `charge.success` webhook is re-checked with Paystack's API before an order
 ## Order status rules
 
 - An order is marked paid only when Paystack confirms a successful payment whose reference, amount and currency match the order.
-- A payment that doesn't match leaves the order's status unchanged and adds a history note for you to check.
+- A payment that doesn't match is logged and adds a history note for you to check. An order that hasn't left OpenCart's hidden status yet is moved to your Pending status so the note is visible; the note isn't repeated on later retries.
 - Failed or abandoned payments, including closing the payment popup, leave the order unchanged.
 - An order that is already paid or completed is never changed again.
 
 ## Tests
 
-The standalone checks in `tools/` run from the command line only (they are excluded from the Docker image):
+The standalone checks in `tools/` run from the command line only (they are excluded from the Docker image and from release archives). Run them all with:
 
 ```bash
-php tools/test-restricted-key.php
-php tools/test-callback.php
-php tools/test-webhook.php
+php tools/run-tests.php
 ```
+
+It runs each `tools/test-*.php` script and exits non-zero if any fails.
 
 ## Running the paystack OpenCart plugin on docker
 Contained within this repo, is a dockerfile and a docker-compose file to quickly spin up an opencart and mysql container with the paystack opencart plugin installed.

@@ -4,10 +4,6 @@ namespace Paystack;
 
 class Restricted_Key
 {
-    const BASE_URL = 'https://api.paystack.co/';
-    const CONCURRENCY = 5;
-    const PROBE_TIMEOUT = 4;
-    const CONNECT_TIMEOUT = 3;
     const OVERALL_DEADLINE = 20;
     const SCOPE_DENIED_MESSAGE = 'This restricted key is not permitted to perform this action';
     const STUB_MESSAGE = 'Sorry, this feature is no longer available.';
@@ -18,7 +14,7 @@ class Restricted_Key
 
     public function __construct(?callable $requester = null)
     {
-        $this->requester = $requester ? $requester : array(__CLASS__, 'curlRequester');
+        $this->requester = $requester ? $requester : array('Paystack\\Http', 'request');
     }
 
     // Intentional divergences from BigCommerce/Shopify: transactions:write is refused (probed via the
@@ -122,6 +118,7 @@ class Restricted_Key
         $isActive = !empty($in['is_active']);
         $becoming = !empty($in['becoming_active']);
         $live = $isActive || $becoming;
+        $validPublic = self::isPublicKey($postedPublic, $mode) ? $postedPublic : '';
 
         if (!empty($in['remove'])) {
             if ($live) {
@@ -137,13 +134,13 @@ class Restricted_Key
             if ($live) {
                 return self::plan('reject', '', null, 'missing_key');
             }
-            return self::plan('empty', '', null, null);
+            return self::plan('empty', '', $validPublic, null);
         }
 
         $kind = self::keyKind($key);
         // An unusable legacy key in a mode that isn't going live is left alone so it can't block unrelated saves.
-        if ($kind === null && $fromStored && !$live) {
-            return self::plan('keep_sk', $key, null, null);
+        if ($kind === null && $fromStored) {
+            return $live ? self::plan('reject', '', null, 'stored_key_invalid') : self::plan('keep_sk', $key, $validPublic, null);
         }
         if ($kind === null) {
             return self::plan('reject', '', null, 'bad_shape');
@@ -169,6 +166,32 @@ class Restricted_Key
             return self::plan('reject', '', null, 'bad_public_key');
         }
         return self::plan($fromStored ? 'keep_sk' : 'sk_check', $key, $postedPublic, null);
+    }
+
+    public static function planWebhookSecret(array $in)
+    {
+        $posted = isset($in['posted']) && is_string($in['posted']) ? $in['posted'] : '';
+        $stored = isset($in['stored']) && is_string($in['stored']) ? $in['stored'] : '';
+        if (!empty($in['remove'])) {
+            return array('value' => '', 'error' => null);
+        }
+        if ($posted === '') {
+            return array('value' => $stored, 'error' => null);
+        }
+        if (self::isWebhookSecret($posted)) {
+            return array('value' => $posted, 'error' => null);
+        }
+        return array('value' => $stored, 'error' => 'bad_shape');
+    }
+
+    // Enabling the extension (status 0 to 1) counts as going live for the mode in use, so its scopes are re-checked.
+    public static function modeFlags($mode, $postedLive, $storedLive, $postedStatus, $storedStatus)
+    {
+        $isLive = $mode === 'live';
+        $active = $isLive === (bool) $postedLive;
+        $switched = $isLive !== (bool) $storedLive;
+        $enabled = (bool) $postedStatus && !$storedStatus;
+        return array('is_active' => $active, 'becoming_active' => $active && ($switched || $enabled));
     }
 
     private static function plan($action, $key, $public, $error)
@@ -310,12 +333,23 @@ class Restricted_Key
             'body' => $probe['body'], 'key' => $key);
     }
 
+    private static function timedOut()
+    {
+        $v = self::verdict('unverifiable', array(), array(), 'transient');
+        $v['log'] = '-';
+        return $v;
+    }
+
     public function validate(
         #[\SensitiveParameter]
         $key,
-        $mode
+        $mode,
+        $deadlineAt = null
     ) {
         try {
+            if ($deadlineAt === null) {
+                $deadlineAt = microtime(true) + self::OVERALL_DEADLINE;
+            }
             if ($mode !== 'test' && $mode !== 'live') {
                 $v = self::verdict('wrong_mode');
                 $v['log'] = '-';
@@ -332,12 +366,14 @@ class Restricted_Key
                 return $v;
             }
 
-            $start = microtime(true);
             $probes = self::probes();
             $baselineProbe = array_shift($probes);
             $results = array();
 
-            $res = $this->request(array(self::toRequest($baselineProbe, $key)), self::OVERALL_DEADLINE);
+            if ($deadlineAt - microtime(true) <= 0) {
+                return self::timedOut();
+            }
+            $res = $this->request(array(self::toRequest($baselineProbe, $key)), $deadlineAt - microtime(true));
             $r = $res[$baselineProbe['scope']];
             $baseline = self::classify($baselineProbe, $r['status'], $r['body'], null);
             $results[] = array('probe' => $baselineProbe, 'outcome' => $baseline, 'status' => $r['status'],
@@ -349,7 +385,10 @@ class Restricted_Key
                 foreach ($probes as $p) {
                     $requests[] = self::toRequest($p, $key);
                 }
-                $res = $this->request($requests, self::OVERALL_DEADLINE - (microtime(true) - $start));
+                if ($deadlineAt - microtime(true) <= 0) {
+                    return self::timedOut();
+                }
+                $res = $this->request($requests, $deadlineAt - microtime(true));
                 foreach ($probes as $p) {
                     $r = $res[$p['scope']];
                     $results[] = array('probe' => $p, 'outcome' => self::classify($p, $r['status'], $r['body'], $baseline),
@@ -384,203 +423,5 @@ class Restricted_Key
             $v['log'] = '-';
             return $v;
         }
-    }
-
-    // Results never carry curl_error() text: it can echo request details.
-    public static function curlRequester(array $requests, $deadlineSeconds)
-    {
-        $out = array();
-        $queue = array_values($requests);
-        $active = array();
-        $mh = curl_multi_init();
-        $end = microtime(true) + $deadlineSeconds;
-
-        while (true) {
-            while ($queue && count($active) < self::CONCURRENCY) {
-                $req = array_shift($queue);
-                $ch = curl_init();
-                $headers = array('Authorization: Bearer ' . $req['key'], 'Accept: application/json');
-                $opts = array(
-                    CURLOPT_URL => self::BASE_URL . $req['path'],
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_TIMEOUT => self::PROBE_TIMEOUT,
-                    CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT,
-                    CURLOPT_FOLLOWLOCATION => false,
-                    CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
-                    CURLOPT_SSL_VERIFYPEER => true,
-                    CURLOPT_SSL_VERIFYHOST => 2,
-                    CURLOPT_VERBOSE => false,
-                    CURLOPT_PRIVATE => $req['id'],
-                );
-                if ($req['method'] === 'POST') {
-                    $opts[CURLOPT_POST] = true;
-                    $opts[CURLOPT_POSTFIELDS] = (string) $req['body'];
-                    $headers[] = 'Content-Type: application/json';
-                }
-                $opts[CURLOPT_HTTPHEADER] = $headers;
-                curl_setopt_array($ch, $opts);
-                curl_multi_add_handle($mh, $ch);
-                $active[$req['id']] = $ch;
-            }
-
-            curl_multi_exec($mh, $running);
-            while ($info = curl_multi_info_read($mh)) {
-                $ch = $info['handle'];
-                $id = curl_getinfo($ch, CURLINFO_PRIVATE);
-                $out[$id] = array(
-                    'status' => (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE),
-                    'body' => (string) curl_multi_getcontent($ch),
-                    'errno' => (int) $info['result'],
-                );
-                self::release($mh, $ch);
-                unset($active[$id]);
-            }
-
-            if (!$active && !$queue) {
-                break;
-            }
-            if (microtime(true) >= $end) {
-                break;
-            }
-            if (curl_multi_select($mh, 0.2) === -1) {
-                usleep(10000);
-            }
-        }
-
-        foreach ($active as $id => $ch) {
-            self::release($mh, $ch);
-            $out[$id] = array('status' => 0, 'body' => '', 'errno' => -1);
-        }
-        foreach ($queue as $req) {
-            $out[$req['id']] = array('status' => 0, 'body' => '', 'errno' => -1);
-        }
-        curl_multi_close($mh);
-        return $out;
-    }
-
-    private static function release($mh, $ch)
-    {
-        curl_multi_remove_handle($mh, $ch);
-        if (PHP_VERSION_ID < 80000) {
-            curl_close($ch);
-        }
-    }
-
-    public static function parseReference($ref)
-    {
-        if (!is_string($ref) || !preg_match('/^([1-9]\d*)-[0-9a-f]{13}\z/', $ref, $m)) {
-            return null;
-        }
-        if (strlen($m[1]) > 18) {
-            return null;
-        }
-        return (int) $m[1];
-    }
-
-    public static function paymentDecision(array $in)
-    {
-        $response = isset($in['response']) ? $in['response'] : null;
-        if (!isset($in['http_status']) || $in['http_status'] !== 200 || !is_array($response)) {
-            return 'ignore';
-        }
-        if (!isset($response['status']) || $response['status'] !== true) {
-            return 'ignore';
-        }
-        $data = isset($response['data']) ? $response['data'] : null;
-        if (!is_array($data) || !isset($data['reference']) || !isset($in['reference'])
-            || !is_string($data['reference']) || $data['reference'] !== $in['reference']) {
-            return 'ignore';
-        }
-        $orderId = self::parseReference($in['reference']);
-        if ($orderId === null || $orderId !== $in['order_id']) {
-            return 'ignore';
-        }
-        if (!in_array($in['order_status_id'], $in['unpaid_status_ids'], true)) {
-            return 'ignore';
-        }
-        if (!isset($data['status']) || $data['status'] !== 'success') {
-            return 'not_paid';
-        }
-
-        $amount = null;
-        if (isset($data['requested_amount']) && is_int($data['requested_amount'])) {
-            $amount = $data['requested_amount'];
-        } elseif (isset($data['amount'])) {
-            $amount = $data['amount'];
-        }
-        if (!is_int($amount)) {
-            return 'ignore';
-        }
-        $currency = isset($data['currency']) && is_string($data['currency']) ? $data['currency'] : '';
-        if ($amount === $in['expected_amount'] && strtoupper($currency) === strtoupper($in['currency'])) {
-            return 'paid';
-        }
-        return 'mismatch';
-    }
-
-    public static function verifySignature(
-        $header,
-        $input,
-        #[\SensitiveParameter]
-        $whsec,
-        $now
-    ) {
-        if (!is_string($header) || !is_string($input) || !is_string($whsec) || $whsec === '') {
-            return false;
-        }
-        $t = array();
-        $v1 = array();
-        foreach (explode(',', $header) as $part) {
-            $pair = explode('=', trim($part), 2);
-            if (count($pair) !== 2) {
-                continue;
-            }
-            if ($pair[0] === 't') {
-                $t[] = $pair[1];
-            } elseif ($pair[0] === 'v1') {
-                $pos = strpos($pair[1], ':');
-                $v1[] = $pos === false ? $pair[1] : substr($pair[1], $pos + 1);
-            }
-        }
-        if (count($t) !== 1 || !ctype_digit($t[0]) || strlen($t[0]) > 15 || !$v1) {
-            return false;
-        }
-        // Without a timestamp window a captured webhook could be replayed forever.
-        if (abs($now - (int) $t[0]) > 300) {
-            return false;
-        }
-        $expected = hash_hmac('sha512', $t[0] . '.' . $input, $whsec);
-        $ok = false;
-        foreach ($v1 as $candidate) {
-            if (hash_equals($expected, $candidate)) {
-                $ok = true;
-            }
-        }
-        return $ok;
-    }
-
-    public static function isWebhookAuthentic(
-        $input,
-        #[\SensitiveParameter]
-        $whsec,
-        #[\SensitiveParameter]
-        $secretKey,
-        array $server,
-        $now
-    ) {
-        if (!is_string($input)) {
-            return false;
-        }
-        if (is_string($whsec) && $whsec !== '') {
-            // Once a signing secret is set the legacy header is refused, so a leaked sk can't forge webhooks.
-            return isset($server['HTTP_PAYSTACK_SIGNATURE']) && is_string($server['HTTP_PAYSTACK_SIGNATURE'])
-                && self::verifySignature($server['HTTP_PAYSTACK_SIGNATURE'], $input, $whsec, $now);
-        }
-        if (self::keyKind($secretKey) === 'sk'
-            && isset($server['HTTP_X_PAYSTACK_SIGNATURE']) && is_string($server['HTTP_X_PAYSTACK_SIGNATURE'])
-            && $server['HTTP_X_PAYSTACK_SIGNATURE'] !== '') {
-            return hash_equals(hash_hmac('sha512', $input, $secretKey), $server['HTTP_X_PAYSTACK_SIGNATURE']);
-        }
-        return false;
     }
 }

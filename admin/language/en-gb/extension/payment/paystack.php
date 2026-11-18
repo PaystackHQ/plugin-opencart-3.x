@@ -11,6 +11,7 @@ $_['text_pay']              = 'Pay';
 $_['text_disable_payment']  = 'Disable Payment Method';
 $_['text_saved_rk']         = 'Saved restricted key …%s — leave blank to keep';
 $_['text_saved_sk']         = 'Saved secret key …%s — leave blank to keep';
+$_['text_public_from_rk']    = 'The public key comes from Paystack for a restricted key and can\'t be edited.';
 $_['text_saved_key']        = 'Saved key — leave blank to keep';
 $_['text_set_webhook']      = 'To receive webhooks, set your webhook URL on your <a href="https://dashboard.paystack.co/#/settings/developer">Paystack Dashboard</a> to the URL below, then paste the webhook signing secret (whsec_&hellip;) from the Dashboard into the matching field. A secret key works without a signing secret; a restricted key needs one to receive webhooks. Customers returning to the shop complete their orders either way.';
 $_['text_saved_whsec']      = 'Saved signing secret …%s — leave blank to keep';
@@ -67,6 +68,7 @@ $_['error_key_account']         = 'Paystack didn\'t return this key\'s account d
 $_['error_key_blocked']         = 'Paystack refused our check of this key. If you use an IP whitelist on your Paystack account, add this server\'s address and try again.';
 $_['error_key_unverifiable']    = 'We couldn\'t reach Paystack to check this key. Please try again.';
 $_['error_key_wrong_mode']      = 'This key does not belong in the %s mode field.';
+$_['error_key_stored_key_invalid'] = 'The saved %s key is not valid. Paste your key again.';
 $_['error_key_bad_shape']       = 'This is not a valid secret key (sk_) or restricted key (rk_).';
 $_['error_key_missing_key']     = 'A secret or restricted key is required for the mode in use.';
 $_['error_key_missing_public_key'] = 'A public key is required when you use a secret key in the mode in use.';

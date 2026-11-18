@@ -5,6 +5,7 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
+require __DIR__ . '/../system/library/paystack/http.php';
 require __DIR__ . '/../system/library/paystack/restricted_key.php';
 
 use Paystack\Restricted_Key as RK;
@@ -478,7 +479,25 @@ same('keep_sk on active still needs a pk', act($p), array('reject', 'missing_pub
 $p = plan(array('stored' => 'legacy-garbage', 'is_active' => false));
 same('unusable legacy stored key on inactive mode is kept untouched', array($p['action'], $p['key']), array('keep_sk', 'legacy-garbage'));
 $p = plan(array('stored' => 'legacy-garbage', 'is_active' => true));
-same('unusable legacy stored key on active mode is refused', act($p), array('reject', 'bad_shape'));
+same('unusable legacy stored key on active mode is refused', act($p), array('reject', 'stored_key_invalid'));
+$p = plan(array('stored' => 'legacy-garbage', 'becoming_active' => true));
+same('unusable legacy stored key on a mode becoming active is refused', act($p), array('reject', 'stored_key_invalid'));
+$p = plan(array('posted' => 'legacy-garbage', 'is_active' => true));
+same('unusable posted key is still bad_shape', act($p), array('reject', 'bad_shape'));
+
+// planMode: public is always final
+$p = plan(array('posted_public' => $PK));
+same('empty uses validated posted pk', array($p['action'], $p['public']), array('empty', $PK));
+$p = plan(array('posted_public' => $PK_LIVE));
+same('empty drops a wrong-mode posted pk', $p['public'], '');
+$p = plan(array('posted_public' => "pk_test_a');x"));
+same('empty drops a malformed posted pk', $p['public'], '');
+$p = plan(array('stored' => 'legacy-garbage', 'posted_public' => $PK));
+same('legacy keep_sk uses validated posted pk', array($p['action'], $p['public']), array('keep_sk', $PK));
+$p = plan(array('stored' => 'legacy-garbage', 'posted_public' => 'junk'));
+same('legacy keep_sk drops a bad posted pk', $p['public'], '');
+$p = plan(array('stored' => $RK, 'stored_public' => $PK, 'is_active' => true));
+same('keep_rk public is final', $p['public'], $PK);
 
 $p = plan(array('remove' => true, 'stored' => $SK, 'is_active' => false));
 same('remove on inactive: clear', array($p['action'], $p['key'], $p['public']), array('clear', '', ''));
@@ -494,9 +513,60 @@ same('live mode rk: probe', $p['action'], 'probe');
 $p = plan(array('posted' => 'x', 'stored' => $RK, 'is_active' => true));
 same('bad posted key does not fall back to stored', act($p), array('reject', 'bad_shape'));
 
+// planWebhookSecret
+$WS = 'whsec_abc123';
+$wsp = function (array $over) {
+    return RK::planWebhookSecret(array_merge(array('posted' => '', 'stored' => '', 'remove' => false), $over));
+};
+same('whsec blank keeps stored', $wsp(array('stored' => $WS)), array('value' => $WS, 'error' => null));
+same('whsec blank nothing stored', $wsp(array()), array('value' => '', 'error' => null));
+same('whsec posted valid', $wsp(array('posted' => 'whsec_new', 'stored' => $WS)), array('value' => 'whsec_new', 'error' => null));
+same('whsec posted invalid keeps stored with error', $wsp(array('posted' => 'nope', 'stored' => $WS)), array('value' => $WS, 'error' => 'bad_shape'));
+same('whsec remove clears', $wsp(array('remove' => true, 'stored' => $WS)), array('value' => '', 'error' => null));
+same('whsec remove beats a posted value', $wsp(array('remove' => true, 'posted' => 'whsec_new', 'stored' => $WS)), array('value' => '', 'error' => null));
+same('whsec remove beats an invalid posted value', $wsp(array('remove' => true, 'posted' => 'nope')), array('value' => '', 'error' => null));
+same('whsec non-string inputs', $wsp(array('posted' => null, 'stored' => null)), array('value' => '', 'error' => null));
+
+// modeFlags
+same('flags: live mode, live posted, unchanged', RK::modeFlags('live', true, true, 1, 1), array('is_active' => true, 'becoming_active' => false));
+same('flags: test mode inactive when live posted', RK::modeFlags('test', true, true, 1, 1), array('is_active' => false, 'becoming_active' => false));
+same('flags: test mode active, unchanged', RK::modeFlags('test', false, false, 1, 1), array('is_active' => true, 'becoming_active' => false));
+same('flags: switching test to live', RK::modeFlags('live', true, false, 1, 1), array('is_active' => true, 'becoming_active' => true));
+same('flags: switching live to test', RK::modeFlags('test', false, true, 1, 1), array('is_active' => true, 'becoming_active' => true));
+same('flags: inactive mode never becomes active', RK::modeFlags('test', true, false, 1, 1), array('is_active' => false, 'becoming_active' => false));
+same('flags: status 0 to 1 for the active mode', RK::modeFlags('test', false, false, '1', '0'), array('is_active' => true, 'becoming_active' => true));
+same('flags: status 0 to 1 with nothing stored', RK::modeFlags('test', false, false, '1', null), array('is_active' => true, 'becoming_active' => true));
+same('flags: status 0 to 1 does not touch the other mode', RK::modeFlags('live', false, false, '1', '0'), array('is_active' => false, 'becoming_active' => false));
+same('flags: status 1 to 0', RK::modeFlags('test', false, false, '0', '1'), array('is_active' => true, 'becoming_active' => false));
+same('flags: status stays 1', RK::modeFlags('test', false, false, '1', '1'), array('is_active' => true, 'becoming_active' => false));
+
+// Save-level deadline
+$calls = null;
+$rk = new RK(stub(array(), $calls));
+$v = $rk->validate($KEY, 'test', microtime(true) - 1);
+same('past deadline: unverifiable', array($v['code'], $v['reason']), array('unverifiable', 'transient'));
+same('past deadline: no request sent', $calls, array());
+$seen = array();
+$rk = new RK(function (array $requests, $deadline) use (&$seen) {
+    $seen[] = $deadline;
+    $m = goodResponses();
+    $out = array();
+    foreach ($requests as $req) {
+        $out[$req['id']] = $m[$req['id']];
+    }
+    return $out;
+});
+$at = microtime(true) + 7;
+$v = $rk->validate($KEY, 'test', $at);
+same('deadline honoured: ok', $v['code'], 'ok');
+check('deadline is passed on as the time left', count($seen) === 2 && $seen[0] <= 7 && $seen[0] > 6 && $seen[1] <= $seen[0]);
+$seen = array();
+$v = $rk->validate($KEY, 'test');
+check('default deadline is 20s', $v['code'] === 'ok' && $seen[0] <= 20 && $seen[0] > 19);
+
 // Default requester sanity: no network, only constructs
-check('default requester is callable', is_callable(array('Paystack\Restricted_Key', 'curlRequester')));
-check('base url is https only', strpos(RK::BASE_URL, 'https://') === 0);
+check('default requester is callable', is_callable(array('Paystack\Http', 'request')));
+check('base url is https only', strpos(\Paystack\Http::BASE_URL, 'https://') === 0);
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail === 0 ? 0 : 1);
