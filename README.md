@@ -11,12 +11,12 @@ Install to receive payments for your goods in naira from any Mastercard, Visa or
 - OpenSSL v1.0.1 or more recent
 
 ## Notes
-- Paystack currently only accepts the following currencies: `NGN`, `USD` and `GHS`.
+- The payment method is offered for these store currencies: `NGN`, `GHS`, `USD` and `ZAR`.
 - You need to have created an account on [paystack.com](https://dashboard.paystack.co/#/signup).
 
 ## Features:
 - Paystack payment gateway integration
-- Activates payment module only when cart currency is `NGN`, `USD`or `GHS`.
+- Activates payment module only when cart currency is `NGN`, `GHS`, `USD` or `ZAR`.
 - Activate payment module only when order total reaches the amount you specified
 - Captures call back notification to automatically update order status
 - Simply turn on Live Mode to accept live payments.
@@ -29,10 +29,60 @@ Install to receive payments for your goods in naira from any Mastercard, Visa or
 3. Upload the zipped file to the root of your OpenCart installation then unzip using cPanel File Manager. The folders should merge. 
 4. In admin panel, proceed to ‘Extensions > Payment’ and install ‘Paystack’.
 5. Configure the module accordingly. 
- - To get your live and test secret keys, visit [the Paystack Dashboard](https://dashboard.paystack.co/#/settings/developer).
+ - To get your keys, visit [the Paystack Dashboard](https://dashboard.paystack.co/#/settings/developer). A restricted key is recommended (see below).
 6. Enable Paystack payment gateway on your OpenCart admin.
 7. Add and set NGN, GHS or USD as your default store currency.
 8. Proceed to [Paystack OpenCart Extension](http://www.opencart.com/index.php?route=extension/extension/info&extension_id=25767&filter_search=paystack) to rate our work.
+
+## Using a restricted key
+
+Each mode has one key field, and it takes a Paystack restricted key (`rk_test_…` / `rk_live_…`). There is no public-key field: the plugin reads the public key from Paystack when you save a restricted key and shows it read-only. (A public key saved with a secret key in an earlier version is shown as saved, unchecked.) New secret keys (`sk_…`) are refused.
+
+Create the key on the Paystack Dashboard with only these permissions:
+
+- **Account: read**: lets the plugin read your public key and confirm the key's mode
+- **Transactions: read**: verifies payments
+
+Saving checks the key with Paystack and refuses it when:
+
+- the key is invalid, revoked, or restricted keys aren't enabled on your account;
+- a test key is in the live field, or a live key in the test field;
+- it is missing either permission above;
+- it has a permission the plugin doesn't need. This covers **Transactions: write**, Disputes and refunds, Bulk charges, Direct debit, Preauthorizations, Settlements, Subaccounts, Transfers, Virtual accounts, Webhooks, Connect, Payouts, Customers and Balance;
+- Paystack couldn't be reached to check it. Try again. If you use an IP whitelist on your Paystack account, add your server's address.
+
+Account: write can't be detected, so keep it off yourself. Permissions are checked when you save a key and when you switch a mode on. If you later add permissions to a key on the Dashboard, save it again.
+
+Saved keys are never shown on the settings page, only their last four characters. Leave a field blank to keep the saved key, or tick **Remove saved key** to delete it (not possible for the mode in use).
+
+**Updating from an earlier version:** your settings are kept. A secret key and public key saved before this version keep working, including when you save other settings, until you paste a restricted key; from then on the restricted key is used.
+
+## Webhooks
+
+Set your webhook URL on the Paystack Dashboard to the URL shown on the settings page. Then paste the **webhook signing secret** (`whsec_…`) from the Dashboard into the matching mode's field.
+
+- With a signing secret, webhooks are verified with the `Paystack-Signature` header, and the older `X-Paystack-Signature` header is refused.
+- With a secret key saved before this version and no signing secret, webhooks are verified with `X-Paystack-Signature`, as before.
+- With a restricted key and no signing secret, webhooks are ignored. A restricted key can't verify Paystack's signature.
+
+Every `charge.success` webhook is re-checked with Paystack's API before an order changes. Customers returning to the shop complete their orders either way.
+
+## Order status rules
+
+- An order is marked paid only when Paystack confirms a successful payment whose reference, amount and currency match the order.
+- A payment that doesn't match keeps the order's status and adds one history note for you to check (orders not yet confirmed appear under the **Missing Orders** filter in Sales → Orders).
+- Failed or abandoned payments, including closing the payment popup, leave the order unchanged.
+- An order that is already paid or completed is never changed again.
+
+## Tests
+
+The standalone checks in `tools/` run from the command line only (they are excluded from the Docker image and from release archives). Run them all with:
+
+```bash
+php tools/run-tests.php
+```
+
+It runs each `tools/test-*.php` script and exits non-zero if any fails.
 
 ## Running the paystack OpenCart plugin on docker
 Contained within this repo, is a dockerfile and a docker-compose file to quickly spin up an opencart and mysql container with the paystack opencart plugin installed.
