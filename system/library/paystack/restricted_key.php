@@ -112,12 +112,11 @@ class Restricted_Key
         $posted = self::str($in, 'posted');
         $stored = self::str($in, 'stored');
         $storedPublic = self::str($in, 'stored_public');
-        $postedPublic = self::str($in, 'posted_public');
         $mode = isset($in['mode']) ? $in['mode'] : '';
         $isActive = !empty($in['is_active']);
         $becoming = !empty($in['becoming_active']);
         $live = $isActive || $becoming;
-        $validPublic = self::isPublicKey($postedPublic, $mode) ? $postedPublic : '';
+        $storedPkOk = self::isPublicKey($storedPublic, $mode);
 
         if (!empty($in['remove'])) {
             if ($live) {
@@ -126,20 +125,26 @@ class Restricted_Key
             return self::plan('clear', '', '', null);
         }
 
-        $fromStored = $posted === '';
-        $key = $fromStored ? $stored : $posted;
-
-        if ($key === '') {
-            if ($live) {
-                return self::plan('reject', '', null, 'missing_key');
+        if ($posted === '') {
+            if ($stored === '') {
+                return $live ? self::plan('reject', '', null, 'missing_key') : self::plan('empty', '', $storedPkOk ? $storedPublic : '', null);
             }
-            return self::plan('empty', '', $validPublic, null);
+            if (self::keyKind($stored) !== 'rk') {
+                // Keys saved before restricted keys were supported are kept exactly as saved until the merchant
+                // pastes a restricted key, since the form can no longer re-enter them. They are only refused when
+                // a mode is being switched on, because then the merchant is choosing to take payments with them.
+                $usable = self::keyKind($stored) === 'sk' && self::keyMode($stored) === $mode && $storedPkOk;
+                if ($becoming && !$usable) {
+                    return self::plan('reject', '', null, 'stored_key_invalid');
+                }
+                return self::plan('keep_sk', $stored, $storedPublic, null);
+            }
         }
 
+        $key = $posted === '' ? $stored : $posted;
         $kind = self::keyKind($key);
-        // An unusable legacy key in a mode that isn't going live is left alone so it can't block unrelated saves.
-        if ($kind === null && $fromStored) {
-            return $live ? self::plan('reject', '', null, 'stored_key_invalid') : self::plan('keep_sk', $key, $validPublic, null);
+        if ($kind === 'sk') {
+            return self::plan('reject', '', null, 'sk_not_accepted');
         }
         if ($kind === null) {
             return self::plan('reject', '', null, 'bad_shape');
@@ -148,23 +153,10 @@ class Restricted_Key
             return self::plan('reject', '', null, 'wrong_mode');
         }
 
-        if ($kind === 'rk') {
-            $storedPkOk = self::isPublicKey($storedPublic, $mode);
-            $probe = $key !== $stored || $becoming || ($isActive && !$storedPkOk);
-            if ($probe) {
-                return self::plan('probe', $key, null, null);
-            }
-            return self::plan('keep_rk', $key, $storedPkOk ? $storedPublic : '', null);
+        if ($key !== $stored || $becoming || ($isActive && !$storedPkOk)) {
+            return self::plan('probe', $key, null, null);
         }
-
-        if ($postedPublic === '') {
-            if ($live) {
-                return self::plan('reject', '', null, 'missing_public_key');
-            }
-        } elseif (!self::isPublicKey($postedPublic, $mode)) {
-            return self::plan('reject', '', null, 'bad_public_key');
-        }
-        return self::plan($fromStored ? 'keep_sk' : 'sk_check', $key, $postedPublic, null);
+        return self::plan('keep_rk', $key, $storedPkOk ? $storedPublic : '', null);
     }
 
     // Enabling the extension (status 0 to 1) counts as going live for the mode in use, so its scopes are re-checked.

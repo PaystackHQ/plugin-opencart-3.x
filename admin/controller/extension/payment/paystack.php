@@ -46,18 +46,6 @@ class ControllerExtensionPaymentPaystack extends Controller
 
         $data['cancel'] = $this->url->link('marketplace/extension', 'user_token=' . $this->session->data['user_token'] . '&type=payment', true);
 
-        if (isset($this->request->post['payment_paystack_live_public'])) {
-            $data['payment_paystack_live_public'] = $this->request->post['payment_paystack_live_public'];
-        } else {
-            $data['payment_paystack_live_public'] = $this->config->get('payment_paystack_live_public');
-        }
-
-        if (isset($this->request->post['payment_paystack_test_public'])) {
-            $data['payment_paystack_test_public'] = $this->request->post['payment_paystack_test_public'];
-        } else {
-            $data['payment_paystack_test_public'] = $this->config->get('payment_paystack_test_public');
-        }
-
         if (isset($this->request->post['payment_paystack_live'])) {
             $data['payment_paystack_live'] = $this->request->post['payment_paystack_live'];
         } else {
@@ -80,7 +68,8 @@ class ControllerExtensionPaymentPaystack extends Controller
             $kind = $posted !== '' ? \Paystack\Restricted_Key::keyKind($posted) : $stored_kind;
 
             $data[$mode . '_has_key'] = is_string($stored) && $stored !== '';
-            $data[$mode . '_uses_rk'] = $kind === 'rk';
+            $data[$mode . '_public'] = (string) $this->config->get('payment_paystack_' . $mode . '_public');
+            $data[$mode . '_uses_sk'] = $stored_kind === 'sk';
             if (($mode === 'live') === (bool) $data['payment_paystack_live'] && $kind === 'rk' && !$has_whsec) {
                 $data['webhook_warning'] = true;
             }
@@ -212,7 +201,6 @@ class ControllerExtensionPaymentPaystack extends Controller
                 'posted' => $this->posted_field($post, $mode, 'secret'),
                 'stored' => (string) $this->config->get('payment_paystack_' . $mode . '_secret'),
                 'stored_public' => (string) $this->config->get('payment_paystack_' . $mode . '_public'),
-                'posted_public' => $this->posted_field($post, $mode, 'public'),
                 'mode' => $mode,
                 'is_active' => $flags['is_active'],
                 'becoming_active' => $flags['becoming_active'],
@@ -263,7 +251,7 @@ class ControllerExtensionPaymentPaystack extends Controller
             return false;
         }
 
-        // The only place a public key is chosen: restricted-key modes never trust the posted one.
+        // The only place a public key is chosen; a posted one is never trusted.
         foreach ($plans as $mode => $plan) {
             $pk = isset($public[$mode]) ? $public[$mode] : $plan['public'];
             $this->request->post['payment_paystack_' . $mode . '_secret'] = $plan['key'];

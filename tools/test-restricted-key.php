@@ -375,7 +375,7 @@ $PK_LIVE = 'pk_live_abc123';
 function plan(array $over)
 {
     return RK::planMode(array_merge(array(
-        'posted' => '', 'stored' => '', 'stored_public' => '', 'posted_public' => '', 'mode' => 'test',
+        'posted' => '', 'stored' => '', 'stored_public' => '', 'mode' => 'test',
         'is_active' => false, 'becoming_active' => false, 'remove' => false,
     ), $over));
 }
@@ -393,12 +393,12 @@ $p = plan(array('posted' => $RK_LIVE, 'stored' => $RK, 'is_active' => true));
 same('rk wrong slot mode', act($p), array('reject', 'wrong_mode'));
 $p = plan(array('posted' => 'rk_test_short', 'is_active' => true));
 same('bad shape rk', act($p), array('reject', 'bad_shape'));
-$p = plan(array('posted' => "sk_test_abc\n"));
+$p = plan(array('posted' => "rk_test_" . str_repeat('a', 20) . "\n"));
 same('bad shape trailing newline', act($p), array('reject', 'bad_shape'));
 $p = plan(array('posted' => $RK_LIVE, 'mode' => 'test'));
 same('live rk in test slot even when inactive', act($p), array('reject', 'wrong_mode'));
-$p = plan(array('posted' => $SK_LIVE, 'mode' => 'test', 'is_active' => true, 'posted_public' => $PK));
-same('sk wrong slot mode', act($p), array('reject', 'wrong_mode'));
+$p = plan(array('posted' => $SK_LIVE, 'mode' => 'test', 'is_active' => true));
+same('posted sk of either mode is refused', act($p), array('reject', 'sk_not_accepted'));
 
 $p = plan(array('posted' => $RK, 'stored' => '', 'is_active' => true));
 same('rk changed: probe', act($p), array('probe', null));
@@ -425,52 +425,54 @@ $p = plan(array('stored' => $RK, 'stored_public' => "pk_test_abc\n", 'is_active'
 same('rk unchanged, stored pk malformed on active: probe', $p['action'], 'probe');
 $p = plan(array('stored' => $RK, 'stored_public' => $PK_LIVE, 'is_active' => false));
 same('inactive rk with bad stored pk keeps rk with empty pk', array($p['action'], $p['public']), array('keep_rk', ''));
-$p = plan(array('posted' => $RK, 'stored' => $RK, 'stored_public' => $PK, 'posted_public' => 'pk_test_EVIL', 'is_active' => true));
-same('keep_rk ignores the posted pk', $p['public'], $PK);
 
-$p = plan(array('posted' => $SK, 'posted_public' => $PK, 'is_active' => true, 'stored' => $RK));
-same('sk path: sk_check', act($p), array('sk_check', null));
-same('sk_check returns posted pk', array($p['key'], $p['public']), array($SK, $PK));
-$p = plan(array('posted' => $SK, 'posted_public' => $PK_LIVE, 'is_active' => true));
-same('sk path: pk wrong mode', act($p), array('reject', 'bad_public_key'));
-$p = plan(array('posted' => $SK, 'posted_public' => "pk_test_a');x", 'is_active' => true));
-same('sk path: pk with script', act($p), array('reject', 'bad_public_key'));
-$p = plan(array('posted' => $SK, 'posted_public' => '', 'is_active' => true));
-same('sk path: pk missing on active', act($p), array('reject', 'missing_public_key'));
-$p = plan(array('posted' => $SK, 'posted_public' => '', 'is_active' => false));
-same('sk path: pk blank on inactive allowed', array($p['action'], $p['public']), array('sk_check', ''));
-$p = plan(array('posted' => $SK, 'posted_public' => 'junk', 'is_active' => false));
-same('sk path: junk pk on inactive refused', act($p), array('reject', 'bad_public_key'));
-$p = plan(array('posted' => $SK, 'posted_public' => $PK, 'becoming_active' => true));
-same('sk path: becoming active validates pk', $p['action'], 'sk_check');
-$p = plan(array('posted' => $SK, 'posted_public' => '', 'becoming_active' => true));
-same('sk path: becoming active needs pk', act($p), array('reject', 'missing_public_key'));
-
-$p = plan(array('stored' => $SK, 'posted_public' => $PK, 'is_active' => true));
-same('sk unchanged blank: keep_sk', act($p), array('keep_sk', null));
-same('keep_sk key and public', array($p['key'], $p['public']), array($SK, $PK));
-$p = plan(array('stored' => $SK, 'posted_public' => '', 'is_active' => true));
-same('keep_sk on active still needs a pk', act($p), array('reject', 'missing_public_key'));
+// Secret keys: a saved one keeps working with its saved public key; a newly pasted one is refused.
+$p = plan(array('posted' => $SK, 'stored' => $RK, 'stored_public' => $PK, 'is_active' => true));
+same('posted sk refused on active', act($p), array('reject', 'sk_not_accepted'));
+$p = plan(array('posted' => $SK, 'is_active' => false));
+same('posted sk refused on inactive', act($p), array('reject', 'sk_not_accepted'));
+$p = plan(array('posted' => $SK, 'stored' => $SK, 'stored_public' => $PK, 'is_active' => true));
+same('re-pasting the saved sk is refused too', act($p), array('reject', 'sk_not_accepted'));
+$p = plan(array('stored' => $SK, 'stored_public' => $PK, 'is_active' => true));
+same('stored sk blank on active: keep_sk', act($p), array('keep_sk', null));
+same('keep_sk keeps stored key and stored pk', array($p['key'], $p['public']), array($SK, $PK));
+$p = plan(array('stored' => $SK, 'stored_public' => $PK, 'becoming_active' => true));
+same('stored sk becoming active with good pk: keep_sk', act($p), array('keep_sk', null));
+// An unusable saved pair can't be re-entered any more, so it only blocks switching that mode on.
+$p = plan(array('stored' => $SK, 'stored_public' => '', 'is_active' => true));
+same('stored sk with no stored pk on active is kept', array($p['action'], $p['key'], $p['public']), array('keep_sk', $SK, ''));
+$p = plan(array('stored' => $SK, 'stored_public' => $PK_LIVE, 'is_active' => true));
+same('stored sk with wrong-mode stored pk on active is kept as saved', array($p['action'], $p['public']), array('keep_sk', $PK_LIVE));
+$p = plan(array('stored' => 'SK_test_abc-def', 'stored_public' => 'Pk_Test_x', 'is_active' => true));
+same('pair v2.1.0 accepted but now invalid is kept on active', array($p['action'], $p['key'], $p['public']), array('keep_sk', 'SK_test_abc-def', 'Pk_Test_x'));
+$p = plan(array('stored' => $SK, 'stored_public' => '', 'becoming_active' => true));
+same('stored sk with no stored pk becoming active is refused', act($p), array('reject', 'stored_key_invalid'));
+$p = plan(array('stored' => $SK_LIVE, 'stored_public' => $PK, 'becoming_active' => true));
+same('stored sk of the other mode becoming active is refused', act($p), array('reject', 'stored_key_invalid'));
+$p = plan(array('stored' => $SK, 'stored_public' => '', 'is_active' => false));
+same('stored sk with no pk on inactive is kept', array($p['action'], $p['key'], $p['public']), array('keep_sk', $SK, ''));
+$p = plan(array('stored' => $SK_LIVE, 'stored_public' => $PK_LIVE, 'is_active' => false));
+same('stored sk of the other mode on inactive is kept as saved', array($p['action'], $p['key'], $p['public']), array('keep_sk', $SK_LIVE, $PK_LIVE));
+$p = plan(array('posted' => $RK, 'stored' => $SK, 'stored_public' => $PK, 'is_active' => true));
+same('rk pasted over a stored sk: probe', $p['action'], 'probe');
 $p = plan(array('stored' => 'legacy-garbage', 'is_active' => false));
 same('unusable legacy stored key on inactive mode is kept untouched', array($p['action'], $p['key']), array('keep_sk', 'legacy-garbage'));
 $p = plan(array('stored' => 'legacy-garbage', 'is_active' => true));
-same('unusable legacy stored key on active mode is refused', act($p), array('reject', 'stored_key_invalid'));
+same('unusable legacy stored key on active mode is kept', array($p['action'], $p['key']), array('keep_sk', 'legacy-garbage'));
 $p = plan(array('stored' => 'legacy-garbage', 'becoming_active' => true));
 same('unusable legacy stored key on a mode becoming active is refused', act($p), array('reject', 'stored_key_invalid'));
 $p = plan(array('posted' => 'legacy-garbage', 'is_active' => true));
 same('unusable posted key is still bad_shape', act($p), array('reject', 'bad_shape'));
 
 // planMode: public is always final
-$p = plan(array('posted_public' => $PK));
-same('empty uses validated posted pk', array($p['action'], $p['public']), array('empty', $PK));
-$p = plan(array('posted_public' => $PK_LIVE));
-same('empty drops a wrong-mode posted pk', $p['public'], '');
-$p = plan(array('posted_public' => "pk_test_a');x"));
-same('empty drops a malformed posted pk', $p['public'], '');
-$p = plan(array('stored' => 'legacy-garbage', 'posted_public' => $PK));
-same('legacy keep_sk uses validated posted pk', array($p['action'], $p['public']), array('keep_sk', $PK));
-$p = plan(array('stored' => 'legacy-garbage', 'posted_public' => 'junk'));
-same('legacy keep_sk drops a bad posted pk', $p['public'], '');
+$p = plan(array('stored_public' => $PK));
+same('empty keeps a valid stored pk', array($p['action'], $p['public']), array('empty', $PK));
+$p = plan(array('stored_public' => $PK_LIVE));
+same('empty drops a wrong-mode stored pk', $p['public'], '');
+$p = plan(array('stored' => 'legacy-garbage', 'stored_public' => $PK));
+same('legacy keep_sk keeps a valid stored pk', array($p['action'], $p['public']), array('keep_sk', $PK));
+$p = plan(array('stored' => 'legacy-garbage', 'stored_public' => 'junk'));
+same('legacy keep_sk keeps the stored pk as saved', $p['public'], 'junk');
 $p = plan(array('stored' => $RK, 'stored_public' => $PK, 'is_active' => true));
 same('keep_rk public is final', $p['public'], $PK);
 
@@ -503,20 +505,14 @@ same('whsec remove beats an invalid posted value', $wsp(array('remove' => true, 
 same('whsec non-string inputs', $wsp(array('posted' => null, 'stored' => null)), array('value' => '', 'error' => null));
 
 // planMode: remaining branches
-$p = plan(array('stored' => $SK, 'posted_public' => 'junk', 'is_active' => false));
-same('keep_sk with a junk posted pk is refused', act($p), array('reject', 'bad_public_key'));
-$p = plan(array('stored' => $SK, 'posted_public' => $PK_LIVE, 'is_active' => true));
-same('keep_sk with a wrong-mode posted pk is refused', act($p), array('reject', 'bad_public_key'));
-$p = plan(array('stored' => $SK, 'posted_public' => '', 'is_active' => false));
-same('keep_sk inactive blank pk', array($p['action'], $p['public']), array('keep_sk', ''));
-$p = plan(array('remove' => true, 'stored' => $SK, 'posted_public' => $PK));
-same('clear drops any posted pk', array($p['action'], $p['public']), array('clear', ''));
+$p = plan(array('remove' => true, 'stored' => $SK, 'stored_public' => $PK));
+same('clear drops the stored pk', array($p['action'], $p['public']), array('clear', ''));
 $p = plan(array('posted' => $RK, 'stored' => $RK, 'stored_public' => $PK, 'is_active' => false, 'becoming_active' => true));
 same('rk unchanged becoming active but inactive flag unset: probe', $p['action'], 'probe');
-$p = plan(array('posted' => 5, 'stored' => 7, 'posted_public' => array(), 'is_active' => false));
+$p = plan(array('posted' => 5, 'stored' => 7, 'stored_public' => array(), 'is_active' => false));
 same('non-string inputs behave as blank', act($p), array('empty', null));
-$p = plan(array('stored' => 'legacy-garbage', 'is_active' => false, 'posted_public' => $PK_LIVE));
-same('legacy keep_sk drops a wrong-mode posted pk', $p['public'], '');
+$p = plan(array('stored' => 'legacy-garbage', 'is_active' => false, 'stored_public' => $PK_LIVE));
+same('legacy keep_sk keeps a wrong-mode stored pk as saved', $p['public'], $PK_LIVE);
 same('planWebhookSecret trailing newline is bad_shape', $wsp(array('posted' => "whsec_abc\n", 'stored' => $WS)), array('value' => $WS, 'error' => 'bad_shape'));
 same('planWebhookSecret bare prefix is bad_shape', $wsp(array('posted' => 'whsec_', 'stored' => '')), array('value' => '', 'error' => 'bad_shape'));
 same('planWebhookSecret sk-shaped is bad_shape', $wsp(array('posted' => 'sk_test_abc', 'stored' => $WS)), array('value' => $WS, 'error' => 'bad_shape'));

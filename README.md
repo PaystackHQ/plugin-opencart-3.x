@@ -36,7 +36,7 @@ Install to receive payments for your goods in naira from any Mastercard, Visa or
 
 ## Using a restricted key
 
-Each mode's key field accepts a Paystack restricted key (`rk_test_…` / `rk_live_…`) as well as a secret key (`sk_…`). You don't need a public key with a restricted key: the plugin reads it from Paystack when you save.
+Each mode has one key field, and it takes a Paystack restricted key (`rk_test_…` / `rk_live_…`). There is no public-key field: the plugin reads the public key from Paystack when you save a restricted key and shows it read-only. (A public key saved with a secret key in an earlier version is shown as saved, unchecked.) New secret keys (`sk_…`) are refused.
 
 Create the key on the Paystack Dashboard with only these permissions:
 
@@ -53,14 +53,16 @@ Saving checks the key with Paystack and refuses it when:
 
 Account: write can't be detected, so keep it off yourself. Permissions are checked when you save a key and when you switch a mode on. If you later add permissions to a key on the Dashboard, save it again.
 
-Saved keys are never shown on the settings page, only their last four characters. Leave a field blank to keep the saved key, or tick **Remove saved key** to delete it (not possible for the mode in use). Secret keys keep working as before.
+Saved keys are never shown on the settings page, only their last four characters. Leave a field blank to keep the saved key, or tick **Remove saved key** to delete it (not possible for the mode in use).
+
+**Updating from an earlier version:** your settings are kept. A secret key and public key saved before this version keep working, including when you save other settings, until you paste a restricted key; from then on the restricted key is used.
 
 ## Webhooks
 
 Set your webhook URL on the Paystack Dashboard to the URL shown on the settings page. Then paste the **webhook signing secret** (`whsec_…`) from the Dashboard into the matching mode's field.
 
 - With a signing secret, webhooks are verified with the `Paystack-Signature` header, and the older `X-Paystack-Signature` header is refused.
-- With a secret key and no signing secret, webhooks are verified with `X-Paystack-Signature`, as before.
+- With a secret key saved before this version and no signing secret, webhooks are verified with `X-Paystack-Signature`, as before.
 - With a restricted key and no signing secret, webhooks are ignored. A restricted key can't verify Paystack's signature.
 
 Every `charge.success` webhook is re-checked with Paystack's API before an order changes. Customers returning to the shop complete their orders either way.

@@ -49,7 +49,7 @@
 								</label> 
 								<div class="col-sm-10">
 									<input type="password" name="payment_paystack_test_secret" value="" autocomplete="new-password" placeholder="{{ (test_key_placeholder ? test_key_placeholder : entry_test_secret)|e }}" id="entry-test-secret" class="form-control" />
-										<div class="help-block">{{ help_secret }}</div>
+										<div class="help-block">{{ help_secret }}{% if test_uses_sk %} {{ text_sk_still_works }}{% endif %}</div>
 										{% if test_has_key %}
 										<div class="checkbox">
 											<label><input type="checkbox" name="payment_paystack_test_remove" value="1" /> {{ entry_test_remove }}</label>
@@ -60,14 +60,15 @@
 										{% endif %}
 								</div>
 							</div>
-							<div class="form-group{% if not test_uses_rk %} required{% endif %}">
-								<label class="col-sm-2 control-label" for="entry-test-public">{{ entry_test_public }}
-								</label> 
+							{% if test_public %}
+							<div class="form-group">
+								<label class="col-sm-2 control-label">{{ entry_test_public }}</label>
 								<div class="col-sm-10">
-									<input type="text" name="payment_paystack_test_public" value="{{ payment_paystack_test_public|e }}" placeholder="{{ entry_test_public }}" id="entry-test-public" class="form-control"{% if test_uses_rk %} readonly{% endif %} />
-										<div class="help-block">{% if test_uses_rk %}{{ text_public_from_rk }}{% else %}{{ help_public }}{% endif %}</div>
+									<p class="form-control-static"><code>{{ test_public|e }}</code></p>
+									<div class="help-block">{% if test_uses_sk %}{{ help_public_sk }}{% else %}{{ help_public }}{% endif %}</div>
 								</div>
 							</div>
+							{% endif %}
 							<div class="form-group">
 								<label class="col-sm-2 control-label" for="entry-test-webhook">{{ entry_test_webhook_secret }}
 								</label>
@@ -101,7 +102,7 @@
 								</label> 
 								<div class="col-sm-10">
 									<input type="password" name="payment_paystack_live_secret" value="" autocomplete="new-password" placeholder="{{ (live_key_placeholder ? live_key_placeholder : entry_live_secret)|e }}" id="entry-live-secret" class="form-control" />
-										<div class="help-block">{{ help_secret }}</div>
+										<div class="help-block">{{ help_secret }}{% if live_uses_sk %} {{ text_sk_still_works }}{% endif %}</div>
 										{% if live_has_key %}
 										<div class="checkbox">
 											<label><input type="checkbox" name="payment_paystack_live_remove" value="1" /> {{ entry_live_remove }}</label>
@@ -112,14 +113,15 @@
 										{% endif %}
 								</div>
 							</div>
+							{% if live_public %}
 							<div class="form-group">
-								<label class="col-sm-2 control-label" for="entry-live-public"> {{ entry_live_public }}
-								</label> 
+								<label class="col-sm-2 control-label">{{ entry_live_public }}</label>
 								<div class="col-sm-10">
-									<input type="text" name="payment_paystack_live_public" value="{{ payment_paystack_live_public|e }}" placeholder="{{ entry_live_public }}" id="entry-live-public" class="form-control"{% if live_uses_rk %} readonly{% endif %} />
-										<div class="help-block">{% if live_uses_rk %}{{ text_public_from_rk }}{% else %}{{ help_public }}{% endif %}</div>
+									<p class="form-control-static"><code>{{ live_public|e }}</code></p>
+									<div class="help-block">{% if live_uses_sk %}{{ help_public_sk }}{% else %}{{ help_public }}{% endif %}</div>
 								</div>
 							</div>
+							{% endif %}
 							<div class="form-group">
 								<label class="col-sm-2 control-label" for="entry-live-webhook">{{ entry_live_webhook_secret }}
 								</label>
@@ -254,18 +256,5 @@
 		</div>
 	</div>
 </div>
-
-<script>
-(function () {
-  ['test', 'live'].forEach(function (mode) {
-    var secret = document.getElementById('entry-' + mode + '-secret');
-    var pub = document.getElementById('entry-' + mode + '-public');
-    var storedRk = pub.readOnly;
-    secret.addEventListener('input', function () {
-      pub.readOnly = secret.value === '' ? storedRk : secret.value.indexOf('rk_') === 0;
-    });
-  });
-})();
-</script>
 
 {{ footer }}
