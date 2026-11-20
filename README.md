@@ -6,8 +6,8 @@ Install to receive payments for your goods in naira from any Mastercard, Visa or
 
 ## Requirements
 - Curl 7.34.0 or more recent
-- PHP with the 21 Oct 2026 security fixes for critical remote code execution flaws (GHSA-w8hw-w9fx-j79w, GHSA-6wmf-4rv5-p3rp; [php.net advisory](https://www.php.net/releases/8_2_35.php)): **8.2.35, 8.3.36, 8.4.27, 8.5.12 or later**. PHP 8.1 and older no longer receive security fixes.
-- OpenCart 3.0.5.x. OpenCart 3.0.3.x doesn't run on PHP 8, and this module was tested on OpenCart 3.0.5.1 with PHP 8.3.36.
+- PHP with the 19 Nov 2026 security fixes, which include critical remote code execution flaws (for example CVE-2026-115560; [php.net release](https://www.php.net/releases/8_2_36.php), [ChangeLog](https://www.php.net/ChangeLog-8.php#8.2.36)): **8.2.36, 8.3.37, 8.4.28, 8.5.13, 8.6.0 or later**. These releases also contain the 21 Oct 2026 fixes (GHSA-w8hw-w9fx-j79w, GHSA-6wmf-4rv5-p3rp). PHP 8.1 and older no longer receive security fixes.
+- OpenCart 3.0.5.x. OpenCart 3.0.3.x doesn't run on PHP 8, and this module was tested on OpenCart 3.0.5.1 with PHP 8.3.37.
 - OpenSSL v1.0.1 or more recent
 
 ## Notes
